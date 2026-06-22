@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Aftertone - Engine</title>
+    
+    <script>
+      window.Module = {
+        onRuntimeInitialized: function() {
+          console.log("[JS-BRIDGE] Wasm binary compiled and ready.");
+          window.dispatchEvent(new CustomEvent('wasm-ready'));
+        }
+      };
+    </script>
+    
+    <script src="/wasm/aftertone.js"></script>
+  </head>
+  <body style="margin: 0; background-color: #121212;">
+    <div id="root"></div>
+    <script type="module" src="/src/index.tsx"></script>
+  </body>
+</html>
