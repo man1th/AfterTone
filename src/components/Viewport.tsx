@@ -1,10 +1,12 @@
 import { Component, createSignal, createEffect } from 'solid-js';
 import { ZoomIn, ZoomOut, Hand, RotateCw, SquareCenterlineDashedHorizontal, SquareCenterlineDashedVertical, Import } from 'lucide-solid';
+import { generateToneCurveLUT } from '../utils/spline';
 import shaderCode from '../shaders/adjustments.wgsl?raw';
 import histShaderCode from '../shaders/histogram.wgsl?raw';
 
-interface ViewportProps {
+export interface ViewportProps {
   lightState: any;
+  curves: any;
   onHistogramUpdate: (data: number[]) => void;
   getExportFn: (exportFn: () => void) => void;
 }
@@ -19,6 +21,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
 
   let device: GPUDevice; let context: GPUCanvasContext; let pipeline: GPURenderPipeline;
   let uniformBuffer: GPUBuffer; let bindGroup: GPUBindGroup;
+  let curveTexture: GPUTexture; let curveTextureView: GPUTextureView;
   let computePipeline: GPUComputePipeline; let computeBindGroup: GPUBindGroup;
   let histogramBuffer: GPUBuffer; let readbackBuffer: GPUBuffer;
   let isReadingHistogram = false;
@@ -42,11 +45,12 @@ export const Viewport: Component<ViewportProps> = (props) => {
     context.configure({ device, format, alphaMode: 'premultiplied' });
     canvasRef.width = imgBitmap.width; canvasRef.height = imgBitmap.height;
 
-    const texture = device.createTexture({
-      size: [imgBitmap.width, imgBitmap.height, 1], format: 'rgba8unorm',
-      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT
-    });
+    const texture = device.createTexture({ size: [imgBitmap.width, imgBitmap.height, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     device.queue.copyExternalImageToTexture({ source: imgBitmap }, { texture }, [imgBitmap.width, imgBitmap.height]);
+
+    // 1D Lookup Table for Curves
+    curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
+    curveTextureView = curveTexture.createView();
 
     const module = device.createShaderModule({ code: shaderCode });
     pipeline = device.createRenderPipeline({
@@ -63,7 +67,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
       entries: [
         { binding: 0, resource: { buffer: uniformBuffer } },
         { binding: 1, resource: sampler },
-        { binding: 2, resource: texture.createView() }
+        { binding: 2, resource: texture.createView() },
+        { binding: 3, resource: curveTextureView }
       ]
     });
 
@@ -81,7 +86,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
         { binding: 0, resource: { buffer: uniformBuffer } },
         { binding: 1, resource: sampler },
         { binding: 2, resource: texture.createView() },
-        { binding: 3, resource: { buffer: histogramBuffer } }
+        { binding: 3, resource: curveTextureView },
+        { binding: 4, resource: { buffer: histogramBuffer } }
       ]
     });
 
@@ -94,6 +100,13 @@ export const Viewport: Component<ViewportProps> = (props) => {
 
   const renderFrame = () => {
     if (!device || !context || !pipeline || !hasImage()) return;
+    
+    // SYNCHRONOUSLY generate and upload the Tone Curve LUT to the GPU
+    if (props.curves) {
+      const lut = generateToneCurveLUT(props.curves.master, props.curves.red, props.curves.green, props.curves.blue);
+      device.queue.writeTexture({ texture: curveTexture }, lut, { bytesPerRow: 1024 }, [256, 1, 1]);
+    }
+
     const p = props.lightState; const active = p.enabled;
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0,
@@ -104,6 +117,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
     device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(256));
 
     const commandEncoder = device.createCommandEncoder();
+    
     const computePass = commandEncoder.beginComputePass();
     computePass.setPipeline(computePipeline); computePass.setBindGroup(0, computeBindGroup);
     computePass.dispatchWorkgroups(Math.ceil((canvasRef.width / 4) / 16), Math.ceil((canvasRef.height / 4) / 16));
@@ -140,7 +154,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
   props.getExportFn(exportImage);
 
   createEffect(() => {
-    const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation];
+    const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.curves];
     renderFrame();
   });
 
@@ -153,7 +167,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', overflow: 'hidden', cursor: hasImage() ? (isDragging ? 'grabbing' : 'grab') : 'default' }} onWheel={(e:any) => { if (!hasImage()) return; e.preventDefault(); setScale(s => Math.max(0.01, s * Math.exp(-e.deltaY * 0.002))); }} onMouseDown={(e:any) => { if (!hasImage()) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; }} onMouseMove={(e:any) => { if (!isDragging) return; setOffset(o => ({ x: o.x + (e.clientX - lastX), y: o.y + (e.clientY - lastY) })); lastX = e.clientX; lastY = e.clientY; }} onMouseUp={() => isDragging = false} onMouseLeave={() => isDragging = false}>
-      
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(28, 28, 28, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '2px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none', border: '1px solid #333' }}>
         <button onClick={() => setScale(s => s * 1.25)} style={iconBtnStyle} title="Zoom In"><ZoomIn size={15} /></button>
         <button onClick={() => setScale(s => s / 1.25)} style={iconBtnStyle} title="Zoom Out"><ZoomOut size={15} /></button>
@@ -163,19 +176,11 @@ export const Viewport: Component<ViewportProps> = (props) => {
         <button onClick={() => setFlipX(x => x * -1)} style={iconBtnStyle} title="Flip Horizontal"><SquareCenterlineDashedHorizontal size={15} /></button>
         <button onClick={() => setFlipY(y => y * -1)} style={iconBtnStyle} title="Flip Vertical"><SquareCenterlineDashedVertical size={15} /></button>
       </div>
-
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
-      
-      <canvas 
-        ref={canvasRef} 
-        style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, display: hasImage() ? 'block' : 'none', 'box-shadow': '0 10px 50px rgba(0,0,0,0.8)', transition: 'transform 0.1s cubic-bezier(0.2, 0, 0, 1)' }}
-      />
-      
+      <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, display: hasImage() ? 'block' : 'none', 'box-shadow': '0 10px 50px rgba(0,0,0,0.8)', transition: 'transform 0.1s cubic-bezier(0.2, 0, 0, 1)' }} />
       {!hasImage() && (
         <div style={{ 'z-index': 2, 'text-align': 'center' }}>
-          <button onClick={() => fileInputRef.click()} style={{ background: '#2a2a2a', color: '#e0e0e0', border: '1px solid #444', padding: '10px 20px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '12px', 'font-weight': '600', display: 'flex', 'align-items': 'center', gap: '8px', transition: 'background 0.2s' }}>
-            <Import size={16} color="#888" /> Import Photo
-          </button>
+          <button onClick={() => fileInputRef.click()} style={{ background: '#2a2a2a', color: '#e0e0e0', border: '1px solid #444', padding: '10px 20px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '12px', 'font-weight': '600', display: 'flex', 'align-items': 'center', gap: '8px', transition: 'background 0.2s' }}><Import size={16} color="#888" /> Import Photo</button>
           <input type="file" accept="image/jpeg, image/png, image/webp, image/tiff" ref={fileInputRef} style={{ display: 'none' }} onChange={handleFileUpload} />
         </div>
       )}
