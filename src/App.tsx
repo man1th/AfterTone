@@ -6,7 +6,7 @@ import {
   onCleanup,
 } from "solid-js";
 import { createStore } from "solid-js/store";
-import { Sun, Eye, EyeClosed, RotateCcw, ChartSpline } from "lucide-solid";
+import { Eye, EyeOff, RotateCcw, ChevronRight } from "lucide-solid";
 import { Slider } from "./components/Slider";
 import { Viewport } from "./components/Viewport";
 import { Histogram } from "./components/Histogram";
@@ -34,9 +34,13 @@ const App: Component = () => {
 
   const [isWasmReady, setIsWasmReady] = createSignal(false);
   const [histogramData, setHistogramData] = createSignal<number[]>([]);
+
+  // Collapsible panel states
   const [lightExpanded, setLightExpanded] = createSignal(true);
   const [curveExpanded, setCurveExpanded] = createSignal(true);
+  const [curveEnabled, setCurveEnabled] = createSignal(true);
 
+  // Spline state initialization
   const defaultCurves = (): CurveState => ({
     master: [
       { x: 0, y: 0 },
@@ -176,6 +180,7 @@ const App: Component = () => {
               cursor: "pointer",
               "font-size": "11px",
               "font-weight": "600",
+              transition: "background 0.2s",
             }}
           >
             Export
@@ -191,10 +196,11 @@ const App: Component = () => {
           overflow: "hidden",
         }}
       >
-        <main style={{ flex: 1, background: "#111" }}>
+        <main style={{ flex: 1, background: "#111", position: "relative" }}>
+          {/* Zero-Cost Bypass: Send default straight line to GPU if curve group is disabled */}
           <Viewport
             lightState={lightState}
-            curves={curves()}
+            curves={curveEnabled() ? curves() : defaultCurves()}
             onHistogramUpdate={setHistogramData}
             getExportFn={(fn) => (triggerExport = fn)}
           />
@@ -218,31 +224,54 @@ const App: Component = () => {
           >
             <Histogram data={histogramData()} />
           </div>
-          <div style={{ padding: "12px 16px", flex: 1, "overflow-y": "auto" }}>
+
+          <div style={{ flex: 1, "overflow-y": "auto" }}>
+            {/* --- LIGHT GROUP HEADER --- */}
             <div
               style={{
                 display: "flex",
                 "align-items": "center",
                 "justify-content": "space-between",
-                "margin-bottom": lightExpanded() ? "14px" : "0",
+                padding: "8px 14px",
+                background: "#1e1e1e",
+                "border-bottom": "1px solid #282828",
                 cursor: "pointer",
+                "user-select": "none",
               }}
               onClick={() => setLightExpanded(!lightExpanded())}
             >
               <div
                 style={{ display: "flex", "align-items": "center", gap: "6px" }}
               >
-                <Sun size={15} color="#e0e0e0" />
+                <ChevronRight
+                  size={14}
+                  color="#888"
+                  style={{
+                    transform: lightExpanded()
+                      ? "rotate(90deg)"
+                      : "rotate(0deg)",
+                    transition: "transform 0.15s ease",
+                  }}
+                />
                 <span
                   style={{
-                    "font-weight": "700",
+                    "font-weight": "600",
                     "font-size": "11px",
                     color: "#e0e0e0",
                     "text-transform": "uppercase",
+                    "letter-spacing": "1px",
                   }}
                 >
                   Light
                 </span>
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "12px",
+                }}
+              >
                 <button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -251,38 +280,48 @@ const App: Component = () => {
                   style={{
                     background: "none",
                     border: "none",
-                    color: lightState.enabled ? "#aaa" : "#555",
+                    color: lightState.enabled ? "#aaa" : "#444",
                     cursor: "pointer",
+                    padding: "0",
+                    display: "flex",
                   }}
+                  title="Toggle Visibility"
                 >
                   {lightState.enabled ? (
-                    <Eye size={13} />
+                    <Eye size={14} />
                   ) : (
-                    <EyeClosed size={13} />
+                    <EyeOff size={14} />
                   )}
                 </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    resetLightParams();
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#777",
+                    cursor: "pointer",
+                    padding: "0",
+                    display: "flex",
+                  }}
+                  title="Reset Light Group"
+                >
+                  <RotateCcw size={12} />
+                </button>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  resetLightParams();
-                }}
-                style={{
-                  background: "none",
-                  border: "none",
-                  color: "#777",
-                  cursor: "pointer",
-                }}
-              >
-                <RotateCcw size={13} />
-              </button>
             </div>
+
+            {/* LIGHT GROUP BODY */}
             {lightExpanded() && (
               <div
                 style={{
+                  padding: "16px 14px",
                   display: "flex",
                   "flex-direction": "column",
                   gap: "2px",
+                  "border-bottom": "1px solid #222",
                 }}
               >
                 <Slider
@@ -321,13 +360,15 @@ const App: Component = () => {
                   disabled={!lightState.enabled}
                   onChange={(v) => setLightState("blacks", v)}
                 />
+
                 <div
                   style={{
                     "font-weight": "600",
                     "font-size": "10px",
                     color: "#777",
                     "text-transform": "uppercase",
-                    margin: "14px 0 8px 0",
+                    "letter-spacing": "0.5px",
+                    margin: "20px 0 12px 0",
                   }}
                 >
                   Presence
@@ -350,13 +391,15 @@ const App: Component = () => {
                   disabled={!lightState.enabled}
                   onChange={(v) => setLightState("dehaze", v)}
                 />
+
                 <div
                   style={{
                     height: "1px",
                     background: "#282828",
-                    margin: "12px 0",
+                    margin: "16px 0",
                   }}
                 ></div>
+
                 <Slider
                   label="Temperature"
                   value={lightState.temp}
@@ -383,60 +426,112 @@ const App: Component = () => {
                 />
               </div>
             )}
-            <div
-              style={{ height: "1px", background: "#282828", margin: "16px 0" }}
-            ></div>
+
+            {/* --- TONE CURVE GROUP HEADER --- */}
             <div
               style={{
                 display: "flex",
                 "align-items": "center",
                 "justify-content": "space-between",
-                "margin-bottom": curveExpanded() ? "14px" : "0",
+                padding: "8px 14px",
+                background: "#1e1e1e",
+                "border-bottom": "1px solid #282828",
                 cursor: "pointer",
+                "user-select": "none",
               }}
               onClick={() => setCurveExpanded(!curveExpanded())}
             >
               <div
                 style={{ display: "flex", "align-items": "center", gap: "6px" }}
               >
-                <ChartSpline size={15} color="#e0e0e0" />
+                <ChevronRight
+                  size={14}
+                  color="#888"
+                  style={{
+                    transform: curveExpanded()
+                      ? "rotate(90deg)"
+                      : "rotate(0deg)",
+                    transition: "transform 0.15s ease",
+                  }}
+                />
                 <span
                   style={{
                     "font-weight": "700",
                     "font-size": "11px",
                     color: "#e0e0e0",
                     "text-transform": "uppercase",
+                    "letter-spacing": "1px",
                   }}
                 >
                   Tone Curve
                 </span>
               </div>
-              <button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setCurves(defaultCurves());
-                }}
+              <div
                 style={{
-                  background: "none",
-                  border: "none",
-                  color: "#777",
-                  cursor: "pointer",
+                  display: "flex",
+                  "align-items": "center",
+                  gap: "12px",
                 }}
               >
-                <RotateCcw size={13} />
-              </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurveEnabled(!curveEnabled());
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: curveEnabled() ? "#aaa" : "#444",
+                    cursor: "pointer",
+                    padding: "0",
+                    display: "flex",
+                  }}
+                  title="Toggle Curve Visibility"
+                >
+                  {curveEnabled() ? <Eye size={14} /> : <EyeOff size={14} />}
+                </button>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setCurves(defaultCurves());
+                  }}
+                  style={{
+                    background: "none",
+                    border: "none",
+                    color: "#777",
+                    cursor: "pointer",
+                    padding: "0",
+                    display: "flex",
+                  }}
+                  title="Reset Curves"
+                >
+                  <RotateCcw size={12} />
+                </button>
+              </div>
             </div>
+
+            {/* TONE CURVE BODY */}
             {curveExpanded() && (
-              <ToneCurve
-                curves={curves()}
-                setCurves={setCurves}
-                disabled={!lightState.enabled}
-              />
+              <div
+                style={{
+                  padding: "16px 14px",
+                  "border-bottom": "1px solid #222",
+                }}
+              >
+                <ToneCurve
+                  curves={curves()}
+                  setCurves={setCurves}
+                  disabled={!curveEnabled()}
+                />
+              </div>
             )}
+
+            <div style={{ height: "40px" }}></div>
           </div>
         </aside>
       </div>
     </div>
   );
 };
+
 export default App;
