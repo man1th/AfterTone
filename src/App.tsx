@@ -51,7 +51,7 @@ const App: Component = () => {
   return (
     <div style={{ display: 'flex', 'flex-direction': 'column', height: '100vh', width: '100vw' }}>
       <header style={{ height: '44px', background: '#1c1c1c', 'border-bottom': '1px solid #282828', display: 'flex', 'align-items': 'center', 'justify-content': 'space-between', padding: '0 16px' }}>
-        <img src="/assets/brand/logo.svg" alt="Aftertone Logo" style={{ height: '16px' }} />
+        <img src="/assets/brand/logo.svg" alt="Aftertone Logo" style={{ height: '20px' }} />
         <div style={{ display: 'flex', gap: '12px', 'align-items': 'center' }}>
           <span style={{ 'font-size': '10px', color: isWasmReady() ? '#4ade80' : '#f87171', 'text-transform': 'uppercase', 'letter-spacing': '1px' }}>{isWasmReady() ? 'Core Online' : 'Booting...'}</span>
           <button onClick={() => triggerExport()} style={{ background: '#333', color: '#e0e0e0', border: '1px solid #444', padding: '4px 14px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '11px', 'font-weight': '600', transition: 'background 0.2s' }}>Export</button>
