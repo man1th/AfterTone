@@ -1708,7 +1708,7 @@ function assignWasmExports(wasmExports) {
   assert(typeof wasmExports['memory'] != 'undefined', 'missing Wasm export: memory');
   assert(typeof wasmExports['__indirect_function_table'] != 'undefined', 'missing Wasm export: __indirect_function_table');
   _init_backend = Module['_init_backend'] = createExportWrapper('init_backend', 0);
-  _update_light_params = Module['_update_light_params'] = createExportWrapper('update_light_params', 6);
+  _update_light_params = Module['_update_light_params'] = createExportWrapper('update_light_params', 13);
   _fflush = createExportWrapper('fflush', 1);
   _strerror = createExportWrapper('strerror', 1);
   _emscripten_stack_get_end = wasmExports['emscripten_stack_get_end'];

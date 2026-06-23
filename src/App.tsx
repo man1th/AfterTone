@@ -7,11 +7,14 @@ import { Histogram } from './components/Histogram';
 declare const window: any;
 
 const App: Component = () => {
-  const [lightState, setLightState] = createStore({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, enabled: true });
+  const [lightState, setLightState] = createStore({ 
+    exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, 
+    texture: 0, clarity: 0, dehaze: 0, 
+    temp: 0, tint: 0, vibrance: 0, saturation: 0, 
+    enabled: true 
+  });
   const [isWasmReady, setIsWasmReady] = createSignal(false);
   const [histogramData, setHistogramData] = createSignal<number[]>([]);
-
-  // Internal trigger placeholder that matches our Viewport's registration callback hook
   let triggerExport: () => void = () => {};
 
   onMount(() => {
@@ -23,13 +26,21 @@ const App: Component = () => {
   createEffect(() => {
     if (!isWasmReady()) return;
     if (lightState.enabled) {
-      window.Module.ccall('update_light_params', 'void', ['number', 'number', 'number', 'number', 'number', 'number'], [lightState.exposure, lightState.contrast, lightState.highlights, lightState.shadows, lightState.whites, lightState.blacks]);
+      window.Module.ccall(
+        'update_light_params', 'void', 
+        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
+        [lightState.exposure, lightState.contrast, lightState.highlights, lightState.shadows, lightState.whites, lightState.blacks, lightState.texture, lightState.clarity, lightState.dehaze, lightState.temp, lightState.tint, lightState.vibrance, lightState.saturation]
+      );
     } else {
-      window.Module.ccall('update_light_params', 'void', ['number', 'number', 'number', 'number', 'number', 'number'], [0, 0, 0, 0, 0, 0]);
+      window.Module.ccall(
+        'update_light_params', 'void', 
+        ['number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number', 'number'], 
+        [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]
+      );
     }
   });
 
-  const resetLightParams = () => setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0 });
+  const resetLightParams = () => setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0 });
   const toggleLightGroup = () => setLightState('enabled', e => !e);
 
   return (
@@ -38,23 +49,13 @@ const App: Component = () => {
         <div style={{ 'font-weight': '700', 'letter-spacing': '0.5px', color: '#fff' }}>AFTERTONE</div>
         <div style={{ display: 'flex', gap: '12px', 'align-items': 'center' }}>
           <span style={{ 'font-size': '11px', color: isWasmReady() ? '#4ade80' : '#f87171' }}>{isWasmReady() ? 'CORE ONLINE' : 'BOOTING CORE...'}</span>
-          <button 
-            onClick={() => triggerExport()} 
-            style={{ background: '#0066cc', color: '#fff', border: 'none', padding: '4px 12px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '13px', 'font-weight': '600' }}
-          >
-            Export
-          </button>
+          <button onClick={() => triggerExport()} style={{ background: '#0066cc', color: '#fff', border: 'none', padding: '4px 12px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '13px', 'font-weight': '600' }}>Export</button>
         </div>
       </header>
 
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
         <main style={{ flex: 1, background: '#111', position: 'relative' }}>
-          {/* Wire the reference function upwards using our clean callback handler strategy */}
-          <Viewport 
-            lightState={lightState} 
-            onHistogramUpdate={setHistogramData} 
-            getExportFn={(fn) => triggerExport = fn} 
-          />
+          <Viewport lightState={lightState} onHistogramUpdate={setHistogramData} getExportFn={(fn) => triggerExport = fn} />
         </main>
 
         <aside style={{ width: '300px', background: '#1e1e1e', 'border-left': '1px solid #2d2d2d', display: 'flex', 'flex-direction': 'column' }}>
@@ -77,6 +78,21 @@ const App: Component = () => {
             <Slider label="Shadows" value={lightState.shadows} disabled={!lightState.enabled} onChange={(v) => setLightState('shadows', v)} />
             <Slider label="Whites" value={lightState.whites} disabled={!lightState.enabled} onChange={(v) => setLightState('whites', v)} />
             <Slider label="Blacks" value={lightState.blacks} disabled={!lightState.enabled} onChange={(v) => setLightState('blacks', v)} />
+
+            <div style={{ 'font-weight': '600', 'font-size': '12px', color: '#888', 'text-transform': 'uppercase', 'margin-top': '24px', 'margin-bottom': '12px' }}>Presence</div>
+            
+            <Slider label="Texture" value={lightState.texture} disabled={!lightState.enabled} onChange={(v) => setLightState('texture', v)} />
+            <Slider label="Clarity" value={lightState.clarity} disabled={!lightState.enabled} onChange={(v) => setLightState('clarity', v)} />
+            <Slider label="Dehaze" value={lightState.dehaze} disabled={!lightState.enabled} onChange={(v) => setLightState('dehaze', v)} />
+            
+            <div style={{ height: '1px', background: '#333', margin: '16px 0' }}></div>
+            
+            <Slider label="Temperature" value={lightState.temp} disabled={!lightState.enabled} onChange={(v) => setLightState('temp', v)} />
+            <Slider label="Tint" value={lightState.tint} disabled={!lightState.enabled} onChange={(v) => setLightState('tint', v)} />
+            <Slider label="Vibrance" value={lightState.vibrance} disabled={!lightState.enabled} onChange={(v) => setLightState('vibrance', v)} />
+            <Slider label="Saturation" value={lightState.saturation} disabled={!lightState.enabled} onChange={(v) => setLightState('saturation', v)} />
+            
+            <div style={{ height: '40px' }}></div> {/* Bottom padding buffer */}
           </div>
         </aside>
       </div>
