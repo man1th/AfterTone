@@ -92,15 +92,12 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // 4. Exact TONE CURVE Application (LR standard)
+    // 4. Exact TONE CURVE Application
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    
-    // Master Curve (stored in Alpha channel)
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).a;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).a;
     rgb.b = textureLoad(curveTex, vec2<i32>(i32(rgb.b * 255.0), 0), 0).a;
 
-    // Recalculate and apply Independent RGB curves
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).r;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).g;
@@ -111,6 +108,18 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let v = params.vibrance / 100.0;
     var vib_scale: f32; if (v >= 0.0) { vib_scale = 1.0 + (v * (1.0 - current_saturation)); } else { vib_scale = 1.0 + (v * current_saturation); }
     rgb = mix(vec3<f32>(getLuma(rgb)), rgb, max(0.0, (1.0 + (params.saturation / 100.0)) * vib_scale));
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    return vec4<f32>(clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0)), color.a);
+    // =========================================================
+    // 6. SPLIT SCREEN COMPARE MODE (Instant Shader Level)
+    // =========================================================
+    if (params.pad1 > 0.5) {
+        if (in.uv.x < 0.5) {
+            rgb = color.rgb; // Original unaffected pixel
+        } else if (abs(in.uv.x - 0.5) < dx * 1.5) {
+            rgb = vec3<f32>(0.85); // Professional separator line
+        }
+    }
+
+    return vec4<f32>(rgb, color.a);
 }

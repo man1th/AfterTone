@@ -119,17 +119,18 @@ export const ToneCurve: Component<ToneCurveProps> = (props) => {
           <line y1="50" x1="0" y2="50" x2="100" stroke="#2a2a2a" stroke-width="0.5" />
           <line y1="75" x1="0" y2="75" x2="100" stroke="#222" stroke-width="0.5" />
           
-          {/* Thinner Background Lines */}
-          {activeChannel() !== 'red' && <path d={svgPaths().red} fill="none" stroke={colors.red} stroke-width="0.75" opacity="0.25" />}
-          {activeChannel() !== 'green' && <path d={svgPaths().green} fill="none" stroke={colors.green} stroke-width="0.75" opacity="0.25" />}
-          {activeChannel() !== 'blue' && <path d={svgPaths().blue} fill="none" stroke={colors.blue} stroke-width="0.75" opacity="0.25" />}
-          {activeChannel() !== 'master' && <path d={svgPaths().master} fill="none" stroke={colors.master} stroke-width="0.75" opacity="0.2" />}
+          {/* Ultra-thin background lines matching histogram */}
+          {activeChannel() !== 'red' && <path d={svgPaths().red} fill="none" stroke={colors.red} stroke-width="0.3" opacity="0.35" />}
+          {activeChannel() !== 'green' && <path d={svgPaths().green} fill="none" stroke={colors.green} stroke-width="0.3" opacity="0.35" />}
+          {activeChannel() !== 'blue' && <path d={svgPaths().blue} fill="none" stroke={colors.blue} stroke-width="0.3" opacity="0.35" />}
+          {activeChannel() !== 'master' && <path d={svgPaths().master} fill="none" stroke={colors.master} stroke-width="0.3" opacity="0.3" />}
           
-          {/* Thinner Active Line */}
-          <path d={svgPaths()[activeChannel()]} fill="none" stroke={colors[activeChannel()]} stroke-width="1.25" style={{ 'pointer-events': 'none' }} />
+          {/* Thin Active Line */}
+          <path d={svgPaths()[activeChannel()]} fill="none" stroke={colors[activeChannel()]} stroke-width="0.5" style={{ 'pointer-events': 'none' }} />
           
+          {/* Shrunk interaction nodes for a cleaner view */}
           {props.curves[activeChannel()].map((pt, i) => (
-            <circle cx={pt.x * 100} cy={100 - pt.y * 100} r="2.5" fill={colors[activeChannel()]} stroke="#141414" stroke-width="1" style={{ cursor: 'pointer' }} onDoubleClick={(e) => handleDoubleClick(e, i)} />
+            <circle cx={pt.x * 100} cy={100 - pt.y * 100} r="1.5" fill={colors[activeChannel()]} stroke="#141414" stroke-width="0.5" style={{ cursor: 'pointer' }} onDoubleClick={(e) => handleDoubleClick(e, i)} />
           ))}
         </svg>
       </div>
