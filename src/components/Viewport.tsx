@@ -2,7 +2,13 @@ import { Component, createSignal, createEffect } from 'solid-js';
 import shaderCode from '../shaders/adjustments.wgsl?raw';
 import histShaderCode from '../shaders/histogram.wgsl?raw';
 
-export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: number[]) => void }> = (props) => {
+interface ViewportProps {
+  lightState: any;
+  onHistogramUpdate: (data: number[]) => void;
+  getExportFn: (exportFn: () => void) => void;
+}
+
+export const Viewport: Component<ViewportProps> = (props) => {
   let canvasRef!: HTMLCanvasElement;
   let containerRef!: HTMLDivElement;
   let fileInputRef!: HTMLInputElement;
@@ -22,6 +28,7 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
   let histogramBuffer: GPUBuffer;
   let readbackBuffer: GPUBuffer;
 
+  // Viewport Transform State
   const [scale, setScale] = createSignal(1);
   const [offset, setOffset] = createSignal({ x: 0, y: 0 });
   const [rotation, setRotation] = createSignal(0);
@@ -32,7 +39,7 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
   let lastX = 0; let lastY = 0;
 
   const initWebGPU = async (imgBitmap: ImageBitmap) => {
-    if (!navigator.gpu) { setError("WebGPU is not supported."); return; }
+    if (!navigator.gpu) { setError("WebGPU is not supported in this browser."); return; }
     const adapter = await navigator.gpu.requestAdapter();
     if (!adapter) { setError("Failed to acquire WebGPU adapter."); return; }
     
@@ -145,7 +152,7 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
         const array = new Uint32Array(readbackBuffer.getMappedRange());
         props.onHistogramUpdate(Array.from(array));
         readbackBuffer.unmap();
-      }).catch(() => {}); // Safely ignore map aborts during rapid scrubbing
+      }).catch(() => {});
     }
   };
 
@@ -154,6 +161,30 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
     renderFrame();
   });
 
+  // --- THE EXPORT IMPLEMENTATION ---
+  const exportImage = () => {
+    if (!hasImage() || !canvasRef) return;
+    
+    // Force a full hardware rendering pass to ensure canvas state is pristine
+    renderFrame();
+
+    // Capture the WebGPU surface context using the browser standard HTML5 toBlob method
+    canvasRef.toBlob((blob) => {
+      if (!blob) return;
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'aftertone-export.jpg';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 'image/jpeg', 0.95);
+  };
+
+  // Register this inner method cleanly with our parent component hook
+  props.getExportFn(exportImage);
+
   const handleFileUpload = async (e: Event) => {
     const file = (e.target as HTMLInputElement).files?.[0];
     if (!file) return;
@@ -161,17 +192,24 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
     initWebGPU(bmp);
   };
 
+  // --- Interaction Controls ---
   const onWheel = (e: WheelEvent) => { if (!hasImage()) return; e.preventDefault(); setScale(s => Math.max(0.01, s * Math.exp(-e.deltaY * 0.002))); };
   const onMouseDown = (e: MouseEvent) => { if (!hasImage()) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; };
-  const onMouseMove = (e: MouseEvent) => { if (!isDragging) return; setOffset(o => ({ x: o.x + (e.clientX - lastX), y: o.y + (e.clientY - lastY) })); lastX = e.clientX; lastY = e.clientY; };
+  const onMouseMove = (e: MouseEvent) => {
+    if (!isDragging) return;
+    setOffset(o => ({ x: o.x + (e.clientX - lastX), y: o.y + (e.clientY - lastY) }));
+    lastX = e.clientX; lastY = e.clientY;
+  };
   const onMouseUp = () => { isDragging = false; };
 
   return (
     <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', overflow: 'hidden', cursor: hasImage() ? (isDragging ? 'grabbing' : 'grab') : 'default' }} onWheel={onWheel} onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}>
+      
+      {/* Viewport UI Controls Overlay */}
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(34, 34, 34, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '4px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none' }}>
         <button onClick={() => setScale(s => s * 1.25)} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Zoom +</button>
         <button onClick={() => setScale(s => s / 1.25)} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Zoom -</button>
-        <button onClick={() => setOffset({x:0, y:0})} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Hand</button>
+        <button onClick={() => setOffset({ x: 0, y: 0 })} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Hand</button>
         <div style={{ width: '1px', background: '#444', margin: '4px' }}></div>
         <button onClick={() => setRotation(r => (r + 90) % 360)} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Rotate</button>
         <button onClick={() => setFlipX(x => x * -1)} style={{ background: 'none', border: 'none', color: '#aaa', padding: '6px 10px', cursor: 'pointer' }}>Flip H</button>
@@ -180,7 +218,17 @@ export const Viewport: Component<{ lightState: any, onHistogramUpdate: (data: nu
 
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
-      <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, display: hasImage() ? 'block' : 'none', 'box-shadow': '0 10px 40px rgba(0,0,0,0.5)', transition: 'transform 0.1s' }} />
+      <canvas 
+        ref={canvasRef} 
+        style={{ 
+          position: 'absolute', 
+          'transform-origin': 'center center',
+          transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`,
+          display: hasImage() ? 'block' : 'none',
+          'box-shadow': '0 10px 40px rgba(0,0,0,0.5)',
+          transition: 'transform 0.1s cubic-bezier(0.2, 0, 0, 1)'
+        }}
+      />
       
       {!hasImage() && (
         <div style={{ 'z-index': 2, 'text-align': 'center' }}>

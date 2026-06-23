@@ -9,9 +9,10 @@ declare const window: any;
 const App: Component = () => {
   const [lightState, setLightState] = createStore({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, enabled: true });
   const [isWasmReady, setIsWasmReady] = createSignal(false);
-  
-  // State to hold the incoming GPU compute data
   const [histogramData, setHistogramData] = createSignal<number[]>([]);
+
+  // Internal trigger placeholder that matches our Viewport's registration callback hook
+  let triggerExport: () => void = () => {};
 
   onMount(() => {
     const initBackend = () => { setIsWasmReady(true); window.Module.ccall('init_backend', 'number', [], []); };
@@ -37,19 +38,26 @@ const App: Component = () => {
         <div style={{ 'font-weight': '700', 'letter-spacing': '0.5px', color: '#fff' }}>AFTERTONE</div>
         <div style={{ display: 'flex', gap: '12px', 'align-items': 'center' }}>
           <span style={{ 'font-size': '11px', color: isWasmReady() ? '#4ade80' : '#f87171' }}>{isWasmReady() ? 'CORE ONLINE' : 'BOOTING CORE...'}</span>
-          <button style={{ background: '#333', color: '#e0e0e0', border: '1px solid #444', padding: '4px 12px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '13px' }}>Export</button>
+          <button 
+            onClick={() => triggerExport()} 
+            style={{ background: '#0066cc', color: '#fff', border: 'none', padding: '4px 12px', 'border-radius': '4px', cursor: 'pointer', 'font-size': '13px', 'font-weight': '600' }}
+          >
+            Export
+          </button>
         </div>
       </header>
 
       <div style={{ display: 'flex', flex: 1, position: 'relative', overflow: 'hidden' }}>
         <main style={{ flex: 1, background: '#111', position: 'relative' }}>
-          {/* Wire the Viewport to emit the data up to the App state */}
-          <Viewport lightState={lightState} onHistogramUpdate={setHistogramData} />
+          {/* Wire the reference function upwards using our clean callback handler strategy */}
+          <Viewport 
+            lightState={lightState} 
+            onHistogramUpdate={setHistogramData} 
+            getExportFn={(fn) => triggerExport = fn} 
+          />
         </main>
 
         <aside style={{ width: '300px', background: '#1e1e1e', 'border-left': '1px solid #2d2d2d', display: 'flex', 'flex-direction': 'column' }}>
-          
-          {/* The Live GPU Histogram */}
           <div style={{ height: '150px', background: '#151515', 'border-bottom': '1px solid #2d2d2d' }}>
             <Histogram data={histogramData()} />
           </div>
