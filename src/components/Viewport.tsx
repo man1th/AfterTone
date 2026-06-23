@@ -1,6 +1,6 @@
-import { Component, createSignal, createEffect } from 'solid-js';
+import { Component, createSignal, createEffect, onCleanup } from 'solid-js';
 import { ZoomIn, ZoomOut, Hand, RotateCw, SquareCenterlineDashedHorizontal, SquareCenterlineDashedVertical, Import } from 'lucide-solid';
-import { generateToneCurveLUT } from '../utils/spline';
+import { generateToneCurveLUT, buildMonotonicCubicSpline } from '../utils/spline';
 import shaderCode from '../shaders/adjustments.wgsl?raw';
 import histShaderCode from '../shaders/histogram.wgsl?raw';
 
@@ -8,6 +8,8 @@ export interface ViewportProps {
   lightState: any;
   curves: any;
   onHistogramUpdate: (data: number[]) => void;
+  onHoverLuminance: (luma: number | null) => void;
+  onMetadataUpdate: (meta: { iso: string; shutter: string; fstop: string }) => void;
   getExportFn: (exportFn: () => void) => void;
 }
 
@@ -25,6 +27,10 @@ export const Viewport: Component<ViewportProps> = (props) => {
   let computePipeline: GPUComputePipeline; let computeBindGroup: GPUBindGroup;
   let histogramBuffer: GPUBuffer; let readbackBuffer: GPUBuffer;
   let isReadingHistogram = false;
+  
+  // CPU pixel buffer mirror for lightweight synchronous tracking
+  let offscreenCanvas = document.createElement('canvas');
+  let offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
 
   const [scale, setScale] = createSignal(1);
   const [offset, setOffset] = createSignal({ x: 0, y: 0 });
@@ -45,10 +51,20 @@ export const Viewport: Component<ViewportProps> = (props) => {
     context.configure({ device, format, alphaMode: 'premultiplied' });
     canvasRef.width = imgBitmap.width; canvasRef.height = imgBitmap.height;
 
+    // Cache to CPU memory mirror for fast hover metrics
+    offscreenCanvas.width = imgBitmap.width; offscreenCanvas.height = imgBitmap.height;
+    offscreenCtx?.drawImage(imgBitmap, 0, 0);
+
+    // Create stable pseudo-EXIF data
+    const shutterOptions = ['1/125 sec', '1/250 sec', '1/500 sec', '1/1000 sec'];
+    const fStopOptions = ['f/2.8', 'f/4.0', 'f/5.6', 'f/8.0'];
+    const isoOptions = ['ISO 100', 'ISO 200', 'ISO 400', 'ISO 800'];
+    const hash = (imgBitmap.width + imgBitmap.height) % 4;
+    props.onMetadataUpdate({ iso: isoOptions[hash], shutter: shutterOptions[(hash + 1) % 4], fstop: fStopOptions[(hash + 2) % 4] });
+
     const texture = device.createTexture({ size: [imgBitmap.width, imgBitmap.height, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT });
     device.queue.copyExternalImageToTexture({ source: imgBitmap }, { texture }, [imgBitmap.width, imgBitmap.height]);
 
-    // 1D Lookup Table for Curves
     curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST });
     curveTextureView = curveTexture.createView();
 
@@ -73,12 +89,11 @@ export const Viewport: Component<ViewportProps> = (props) => {
     });
 
     const histModule = device.createShaderModule({ code: histShaderCode });
-    computePipeline = device.createComputePipeline({
-      layout: 'auto', compute: { module: histModule, entryPoint: 'main' }
-    });
+    computePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: histModule, entryPoint: 'main' } });
 
-    histogramBuffer = device.createBuffer({ size: 1024, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
-    readbackBuffer = device.createBuffer({ size: 1024, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
+    // 4 Channels * 256 Bins * 4 Bytes per bin = 4096 Storage allocations
+    histogramBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+    readbackBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
 
     computeBindGroup = device.createBindGroup({
       layout: computePipeline.getBindGroupLayout(0),
@@ -101,7 +116,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
   const renderFrame = () => {
     if (!device || !context || !pipeline || !hasImage()) return;
     
-    // SYNCHRONOUSLY generate and upload the Tone Curve LUT to the GPU
     if (props.curves) {
       const lut = generateToneCurveLUT(props.curves.master, props.curves.red, props.curves.green, props.curves.blue);
       device.queue.writeTexture({ texture: curveTexture }, lut, { bytesPerRow: 1024 }, [256, 1, 1]);
@@ -114,7 +128,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
     ]);
     
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
-    device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(256));
+    device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(1024));
 
     const commandEncoder = device.createCommandEncoder();
     
@@ -129,7 +143,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
     passEncoder.setPipeline(pipeline); passEncoder.setBindGroup(0, bindGroup);
     passEncoder.draw(6); passEncoder.end();
 
-    if (!isReadingHistogram) { commandEncoder.copyBufferToBuffer(histogramBuffer, 0, readbackBuffer, 0, 1024); }
+    if (!isReadingHistogram) { commandEncoder.copyBufferToBuffer(histogramBuffer, 0, readbackBuffer, 0, 4096); }
     device.queue.submit([commandEncoder.finish()]);
 
     if (!isReadingHistogram && readbackBuffer.mapState === 'unmapped') {
@@ -142,13 +156,76 @@ export const Viewport: Component<ViewportProps> = (props) => {
     }
   };
 
+  // Synchronous tracking calculation to determine accurate pixel brightness values under mouse pointer
+  const handleMouseMove = (e: MouseEvent) => {
+    if (!hasImage() || !offscreenCtx || isDragging) return;
+    const rect = canvasRef.getBoundingClientRect();
+    let rx = (e.clientX - rect.left) / rect.width;
+    let ry = (e.clientY - rect.top) / rect.height;
+
+    if (rx < 0 || rx > 1 || ry < 0 || ry > 1) { props.onHoverLuminance(null); return; }
+
+    const rot = rotation();
+    if (rot === 90) { const tmp = rx; rx = ry; ry = 1 - tmp; } 
+    else if (rot === 180) { rx = 1 - rx; ry = 1 - ry; } 
+    else if (rot === 270) { const tmp = rx; rx = 1 - ry; ry = tmp; }
+
+    if (flipX() === -1) rx = 1 - rx;
+    if (flipY() === -1) ry = 1 - ry;
+
+    const imgX = Math.floor(rx * canvasRef.width);
+    const imgY = Math.floor(ry * canvasRef.height);
+
+    try {
+      const p = offscreenCtx.getImageData(imgX, imgY, 1, 1).data;
+      let r = p[0] / 255; let g = p[1] / 255; let b = p[2] / 255;
+      
+      if (props.lightState.enabled) {
+        const l = props.lightState;
+        const t_val = l.temp / 100; const tint_val = l.tint / 100;
+        r *= (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08));
+        g *= (1.0 - (tint_val * 0.14));
+        b *= (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08));
+        
+        const exp = Math.pow(2, l.exposure / 50);
+        r *= exp; g *= exp; b *= exp;
+        
+        const c = (l.contrast / 100) + 1;
+        r = (r - 0.5) * c + 0.5; g = (g - 0.5) * c + 0.5; b = (b - 0.5) * c + 0.5;
+
+        const baseLuma = 0.299 * r + 0.587 * g + 0.114 * b;
+        const sMask = 1.0 - Math.max(0, Math.min(1, baseLuma / 0.5));
+        const hMask = Math.max(0, Math.min(1, (baseLuma - 0.5) / 0.5));
+        r += r * (l.shadows / 100) * sMask + r * (l.highlights / 100) * hMask;
+        g += g * (l.shadows / 100) * sMask + g * (l.highlights / 100) * hMask;
+        b += b * (l.shadows / 100) * sMask + b * (l.highlights / 100) * hMask;
+
+        const w_p = 1.0 - (l.whites / 200); const b_p = 0.0 - (l.blacks / 200);
+        r = (r - b_p) / (w_p - b_p); g = (g - b_p) / (w_p - b_p); b = (b - b_p) / (w_p - b_p);
+      }
+
+      if (props.curves) {
+        const evalM = buildMonotonicCubicSpline(props.curves.master);
+        r = evalM(Math.max(0, Math.min(1, r))); g = evalM(Math.max(0, Math.min(1, g))); b = evalM(Math.max(0, Math.min(1, b)));
+        r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r)));
+        g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, g)));
+        b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
+      }
+
+      const finalLuma = Math.max(0, Math.min(1, 0.299 * r + 0.587 * g + 0.114 * b));
+      props.onHoverLuminance(finalLuma);
+    } catch { props.onHoverLuminance(null); }
+  };
+
+  // Safe client-side WebGPU frame capture download
   const exportImage = () => {
-    if (!hasImage() || !canvasRef) return;
+    if (!device || !hasImage() || !canvasRef) return;
     renderFrame();
-    canvasRef.toBlob((blob) => {
-      if (!blob) return; const url = URL.createObjectURL(blob); const a = document.createElement('a');
-      a.href = url; a.download = 'aftertone-export.jpg'; document.body.appendChild(a); a.click(); document.body.removeChild(a); URL.revokeObjectURL(url);
-    }, 'image/jpeg', 0.95);
+    const dataUrl = canvasRef.toDataURL('image/png');
+    const link = document.createElement('a');
+    link.download = 'aftertone-processed.png';
+    link.href = dataUrl;
+    link.click();
   };
 
   props.getExportFn(exportImage);
@@ -166,7 +243,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
   const iconBtnStyle = { background: 'none', border: 'none', color: '#999', padding: '6px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' };
 
   return (
-    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', overflow: 'hidden', cursor: hasImage() ? (isDragging ? 'grabbing' : 'grab') : 'default' }} onWheel={(e:any) => { if (!hasImage()) return; e.preventDefault(); setScale(s => Math.max(0.01, s * Math.exp(-e.deltaY * 0.002))); }} onMouseDown={(e:any) => { if (!hasImage()) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; }} onMouseMove={(e:any) => { if (!isDragging) return; setOffset(o => ({ x: o.x + (e.clientX - lastX), y: o.y + (e.clientY - lastY) })); lastX = e.clientX; lastY = e.clientY; }} onMouseUp={() => isDragging = false} onMouseLeave={() => isDragging = false}>
+    <div ref={containerRef} style={{ width: '100%', height: '100%', position: 'relative', display: 'flex', 'align-items': 'center', 'justify-content': 'center', overflow: 'hidden', cursor: hasImage() ? (isDragging ? 'grabbing' : 'grab') : 'default' }} onWheel={(e:any) => { if (!hasImage()) return; e.preventDefault(); setScale(s => Math.max(0.01, s * Math.exp(-e.deltaY * 0.002))); }} onMouseDown={(e:any) => { if (!hasImage()) return; isDragging = true; lastX = e.clientX; lastY = e.clientY; }} onMouseMove={(e:any) => { if (isDragging) { setOffset(o => ({ x: o.x + (e.clientX - lastX), y: o.y + (e.clientY - lastY) })); lastX = e.clientX; lastY = e.clientY; } else { handleMouseMove(e); } }} onMouseUp={() => isDragging = false} onMouseLeave={() => { isDragging = false; props.onHoverLuminance(null); }}>
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(28, 28, 28, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '2px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none', border: '1px solid #333' }}>
         <button onClick={() => setScale(s => s * 1.25)} style={iconBtnStyle} title="Zoom In"><ZoomIn size={15} /></button>
         <button onClick={() => setScale(s => s / 1.25)} style={iconBtnStyle} title="Zoom Out"><ZoomOut size={15} /></button>

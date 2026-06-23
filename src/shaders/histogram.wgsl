@@ -9,7 +9,7 @@ struct LightParams {
 @group(0) @binding(1) var mySampler: sampler;
 @group(0) @binding(2) var myTexture: texture_2d<f32>;
 @group(0) @binding(3) var curveTex: texture_2d<f32>;
-@group(0) @binding(4) var<storage, read_write> bins: array<atomic<u32>, 256>;
+@group(0) @binding(4) var<storage, read_write> bins: array<atomic<u32>, 1024>;
 
 @compute @workgroup_size(16, 16)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
@@ -35,16 +35,28 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     rgb = (rgb - vec3<f32>(b_p)) / vec3<f32>(w_p - b_p);
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    // Histogram accurately tracks the Tone Curve
+    // Process through Master Curve
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).a;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).a;
     rgb.b = textureLoad(curveTex, vec2<i32>(i32(rgb.b * 255.0), 0), 0).a;
 
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    
+    // Process through RGB Channels
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).r;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).g;
     rgb.b = textureLoad(curveTex, vec2<i32>(i32(rgb.b * 255.0), 0), 0).b;
 
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     let finalLuma = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
-    atomicAdd(&bins[clamp(u32(finalLuma * 255.0), 0u, 255u)], 1u);
+
+    let r_bin = clamp(u32(rgb.r * 255.0), 0u, 255u);
+    let g_bin = clamp(u32(rgb.g * 255.0), 0u, 255u);
+    let b_bin = clamp(u32(rgb.b * 255.0), 0u, 255u);
+    let l_bin = clamp(u32(finalLuma * 255.0), 0u, 255u);
+
+    atomicAdd(&bins[r_bin], 1u);
+    atomicAdd(&bins[256u + g_bin], 1u);
+    atomicAdd(&bins[512u + b_bin], 1u);
+    atomicAdd(&bins[768u + l_bin], 1u);
 }
