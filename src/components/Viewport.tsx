@@ -42,10 +42,24 @@ export const Viewport: Component<ViewportProps> = (props) => {
   const renderFrame = () => {
     if (!device || !context || !pipeline || !hasImage()) return;
     if (props.curves) { const lut = generateToneCurveLUT(props.curves.master, props.curves.red, props.curves.green, props.curves.blue); device.queue.writeTexture({ texture: curveTexture }, lut, { bytesPerRow: 1024 }, [256, 1, 1]); }
+    
+    // PURE MATH SYNC: Maps the screen divider directly to texture uv coordinates with zero layout lag
+    let shaderSplitPos = splitPos();
+    if (canvasRef && containerRef) {
+      const containerWidth = containerRef.clientWidth;
+      if (containerWidth > 0) {
+        const dividerX = containerWidth * splitPos();
+        const canvasCenterX = containerWidth / 2 + offset().x;
+        const canvasDisplayWidth = canvasRef.width * scale();
+        const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
+        shaderSplitPos = (dividerX - canvasLeft) / canvasDisplayWidth;
+      }
+    }
+
     const p = props.lightState; const active = p.enabled;
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
-      props.isCompare ? 1.0 : 0.0, splitPos(), 0
+      props.isCompare ? 1.0 : 0.0, shaderSplitPos, 0
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray); device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(1024));
     const commandEncoder = device.createCommandEncoder();
@@ -63,15 +77,24 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (flipX() === -1) rx = 1 - rx; if (flipY() === -1) ry = 1 - ry;
     const imgX = Math.floor(rx * canvasRef.width); const imgY = Math.floor(ry * canvasRef.height);
     try {
+      let shaderSplitPos = splitPos();
+      if (containerRef) {
+        const containerWidth = containerRef.clientWidth;
+        const dividerX = containerWidth * splitPos();
+        const canvasCenterX = containerWidth / 2 + offset().x;
+        const canvasDisplayWidth = canvasRef.width * scale();
+        const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
+        shaderSplitPos = (dividerX - canvasLeft) / canvasDisplayWidth;
+      }
       const p = offscreenCtx.getImageData(imgX, imgY, 1, 1).data; let r = p[0] / 255; let g = p[1] / 255; let b = p[2] / 255;
-      if (props.lightState.enabled && (!props.isCompare || rx >= splitPos())) {
+      if (props.lightState.enabled && (!props.isCompare || rx >= shaderSplitPos)) {
         const l = props.lightState; const t_val = l.temp / 100; const tint_val = l.tint / 100; r *= (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); g *= (1.0 - (tint_val * 0.14)); b *= (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); const exp = Math.pow(2, l.exposure / 50); r *= exp; g *= exp; b *= exp; const c = (l.contrast / 100) + 1; r = (r - 0.5) * c + 0.5; g = (g - 0.5) * c + 0.5; b = (b - 0.5) * c + 0.5;
         const baseLuma = 0.299 * r + 0.587 * g + 0.114 * b; const sMask = 1.0 - Math.max(0, Math.min(1, baseLuma / 0.5)); const hMask = Math.max(0, Math.min(1, (baseLuma - 0.5) / 0.5)); r += r * (l.shadows / 100) * sMask + r * (l.highlights / 100) * hMask; g += g * (l.shadows / 100) * sMask + g * (l.highlights / 100) * hMask; b += b * (l.shadows / 100) * sMask + b * (l.highlights / 100) * hMask;
         const w_p = 1.0 - (l.whites / 200); const b_p = 0.0 - (l.blacks / 200); r = (r - b_p) / (w_p - b_p); g = (g - b_p) / (w_p - b_p); b = (b - b_p) / (w_p - b_p);
       }
-      if (props.curves && (!props.isCompare || rx >= splitPos())) {
+      if (props.curves && (!props.isCompare || rx >= shaderSplitPos)) {
         const evalM = buildMonotonicCubicSpline(props.curves.master); r = evalM(Math.max(0, Math.min(1, r))); g = evalM(Math.max(0, Math.min(1, g))); b = evalM(Math.max(0, Math.min(1, b)));
-        r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r))); g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, g))); b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
+        r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r))); g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, r))); b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
       }
       const finalLuma = Math.max(0, Math.min(1, 0.299 * r + 0.587 * g + 0.114 * b)); props.onHoverLuminance(finalLuma);
     } catch { props.onHoverLuminance(null); }
@@ -80,7 +103,11 @@ export const Viewport: Component<ViewportProps> = (props) => {
   props.getExportFn(() => { if (!device || !hasImage() || !canvasRef) return; renderFrame(); const dataUrl = canvasRef.toDataURL('image/png'); const link = document.createElement('a'); link.download = 'aftertone-processed.png'; link.href = dataUrl; link.click(); });
   props.getImportFn(() => fileInputRef.click());
 
-  createEffect(() => { const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.curves, props.isCompare, splitPos()]; renderFrame(); });
+  createEffect(() => { 
+    const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.curves, props.isCompare, splitPos(), scale(), offset(), rotation(), flipX(), flipY()]; 
+    renderFrame(); 
+  });
+  
   const handleFileUpload = async (e: Event) => { const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return; const bmp = await createImageBitmap(file); initWebGPU(bmp); };
   const iconBtnStyle = { background: 'none', border: 'none', color: '#999', padding: '6px', cursor: 'pointer', display: 'flex', 'align-items': 'center', 'justify-content': 'center' };
 
@@ -90,7 +117,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, display: hasImage() ? 'block' : 'none', 'box-shadow': '0 10px 50px rgba(0,0,0,0.8)', transition: 'transform 0.1s cubic-bezier(0.2, 0, 0, 1)' }} />
       
-      {/* 10X APIS: HARDWARE POINTER CAPTURE ENABLES ZERO-DRAG LOCK INFINITELY */}
+      {/* MONOLITHIC REMAPPED INTERACTIVE SPLIT CONTROL */}
       {props.isCompare && hasImage() && (
         <div 
           onPointerDown={(e) => { 
@@ -112,12 +139,12 @@ export const Viewport: Component<ViewportProps> = (props) => {
           }}
           style={{ position: 'absolute', top: 0, bottom: 0, left: `${splitPos() * 100}%`, width: '40px', 'margin-left': '-20px', cursor: 'ew-resize', 'z-index': 100, display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'touch-action': 'none' }}
         >
-          {/* Visible central line layer */}
-          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '19px', width: '2px', background: '#ffffff', 'box-shadow': '0 0 5px rgba(0,0,0,0.7)', 'pointer-events': 'none' }}></div>
+          {/* 1px Divider Line — Colored #ABABAB */}
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '19px', width: '1px', background: '#ABABAB', 'box-shadow': '0 0 4px rgba(0,0,0,0.3)', 'pointer-events': 'none' }}></div>
           
-          {/* Inline clean chevron pill */}
-          <div style={{ position: 'relative', background: '#ffffff', color: '#111111', 'border-radius': '4px', padding: '4px 6px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'font-size': '11px', 'font-weight': '900', 'box-shadow': '0 2px 8px rgba(0,0,0,0.6)', 'pointer-events': 'none', 'user-select': 'none', 'font-family': 'sans-serif', 'letter-spacing': '-1px' }}>
-            ◀▶
+          {/* Downsized Center Pill Badge — Font-size 8px, Color #ABABAB */}
+          <div style={{ position: 'relative', background: '#1c1c1c', color: '#ABABAB', 'border-radius': '4px', border: '1px solid #444444', padding: '1px 4px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'font-size': '8px', 'font-weight': '800', 'box-shadow': '0 2px 6px rgba(0,0,0,0.6)', 'pointer-events': 'none', 'user-select': 'none', 'font-family': 'monospace', 'letter-spacing': '-0.5px' }}>
+            &lt;&gt;
           </div>
         </div>
       )}
