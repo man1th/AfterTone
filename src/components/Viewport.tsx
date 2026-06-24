@@ -15,41 +15,91 @@ export interface ViewportProps {
 export const Viewport: Component<ViewportProps> = (props) => {
   let canvasRef!: HTMLCanvasElement; let containerRef!: HTMLDivElement; let fileInputRef!: HTMLInputElement;
   const [hasImage, setHasImage] = createSignal(false); const [error, setError] = createSignal<string | null>(null);
-  let device: GPUDevice; let context: GPUCanvasContext; let pipeline: GPURenderPipeline; let uniformBuffer: GPUBuffer; let bindGroup: GPUBindGroup; let curveTexture: GPUTexture; let curveTextureView: GPUTextureView; let computePipeline: GPUComputePipeline; let computeBindGroup: GPUBindGroup; let histogramBuffer: GPUBuffer; let readbackBuffer: GPUBuffer; let isReadingHistogram = false;
+  
+  let device: GPUDevice; let context: GPUCanvasContext; let pipeline: GPURenderPipeline; let uniformBuffer: GPUBuffer; 
+  let bindGroup: GPUBindGroup; let exportBindGroup: GPUBindGroup; let curveTexture: GPUTexture; let curveTextureView: GPUTextureView; 
+  let computePipeline: GPUComputePipeline; let computeBindGroup: GPUBindGroup; let histogramBuffer: GPUBuffer; let readbackBuffer: GPUBuffer; 
+  let isReadingHistogram = false;
+  
+  let imgBitmap: ImageBitmap;
+  let pWidth = 0; let pHeight = 0;
+  let previewTexture: GPUTexture; let fullResTexture: GPUTexture;
+  
   let offscreenCanvas = document.createElement('canvas'); let offscreenCtx = offscreenCanvas.getContext('2d', { willReadFrequently: true });
   const [scale, setScale] = createSignal(1); const [offset, setOffset] = createSignal({ x: 0, y: 0 }); const [rotation, setRotation] = createSignal(0); const [flipX, setFlipX] = createSignal(1); const [flipY, setFlipY] = createSignal(1);
   const [splitPos, setSplitPos] = createSignal(0.5);
   
-  // NEW: Canvas Background Variables
   const [bgColor, setBgColor] = createSignal('#111111');
   const [showBgMenu, setShowBgMenu] = createSignal(false);
   
   let isDragging = false; let isDraggingSplitter = false; let lastX = 0; let lastY = 0;
 
-  const initWebGPU = async (imgBitmap: ImageBitmap) => {
+  const initWebGPU = async (incomingBitmap: ImageBitmap) => {
+    imgBitmap = incomingBitmap;
     if (!navigator.gpu) { setError("WebGPU is not supported."); return; }
     const adapter = await navigator.gpu.requestAdapter(); if (!adapter) { setError("Failed to acquire adapter."); return; }
-    device = await adapter.requestDevice(); context = canvasRef.getContext('webgpu') as GPUCanvasContext; const format = navigator.gpu.getPreferredCanvasFormat();
-    context.configure({ device, format, alphaMode: 'premultiplied' }); canvasRef.width = imgBitmap.width; canvasRef.height = imgBitmap.height;
-    offscreenCanvas.width = imgBitmap.width; offscreenCanvas.height = imgBitmap.height; offscreenCtx?.drawImage(imgBitmap, 0, 0);
+    device = await adapter.requestDevice(); 
+    context = canvasRef.getContext('webgpu') as GPUCanvasContext; 
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    
+    // 10X PROXY ARCHITECTURE: QHD (2560px) bounds for blazing speed + great zoom fidelity
+    const MAX_PREVIEW_DIM = 2560;
+    pWidth = imgBitmap.width;
+    pHeight = imgBitmap.height;
+    if (pWidth > MAX_PREVIEW_DIM || pHeight > MAX_PREVIEW_DIM) {
+      const ratio = pWidth / pHeight;
+      if (pWidth > pHeight) {
+        pWidth = MAX_PREVIEW_DIM;
+        pHeight = Math.round(MAX_PREVIEW_DIM / ratio);
+      } else {
+        pHeight = MAX_PREVIEW_DIM;
+        pWidth = Math.round(MAX_PREVIEW_DIM * ratio);
+      }
+    }
+    
+    canvasRef.width = pWidth; 
+    canvasRef.height = pHeight;
+    context.configure({ device, format, alphaMode: 'premultiplied' }); 
+    
+    offscreenCanvas.width = imgBitmap.width; 
+    offscreenCanvas.height = imgBitmap.height; 
+    offscreenCtx?.drawImage(imgBitmap, 0, 0);
+    
     const shutterOptions = ['1/125 sec', '1/250 sec', '1/500 sec', '1/1000 sec']; const fStopOptions = ['f/2.8', 'f/4.0', 'f/5.6', 'f/8.0']; const isoOptions = ['ISO 100', 'ISO 200', 'ISO 400', 'ISO 800']; const hash = (imgBitmap.width + imgBitmap.height) % 4;
     props.onMetadataUpdate({ iso: isoOptions[hash], shutter: shutterOptions[(hash + 1) % 4], fstop: fStopOptions[(hash + 2) % 4] });
-    const texture = device.createTexture({ size: [imgBitmap.width, imgBitmap.height, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT }); device.queue.copyExternalImageToTexture({ source: imgBitmap }, { texture }, [imgBitmap.width, imgBitmap.height]);
+    
+    // CRITICAL FIX: ADDED GPUTextureUsage.RENDER_ATTACHMENT to prevent Chrome Dawn errors
+    fullResTexture = device.createTexture({ 
+      size: [imgBitmap.width, imgBitmap.height, 1], 
+      format: 'rgba8unorm', 
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT 
+    }); 
+    device.queue.copyExternalImageToTexture({ source: imgBitmap }, { texture: fullResTexture }, [imgBitmap.width, imgBitmap.height]);
+    
+    previewTexture = device.createTexture({ 
+      size: [pWidth, pHeight, 1], 
+      format: 'rgba8unorm', 
+      usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST | GPUTextureUsage.RENDER_ATTACHMENT 
+    });
+    const previewBitmap = await createImageBitmap(imgBitmap, { resizeWidth: pWidth, resizeHeight: pHeight, resizeQuality: 'high' });
+    device.queue.copyExternalImageToTexture({ source: previewBitmap }, { texture: previewTexture }, [pWidth, pHeight]);
+    
     curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST }); curveTextureView = curveTexture.createView();
     const module = device.createShaderModule({ code: shaderCode }); pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs_main' }, fragment: { module, entryPoint: 'fs_main', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     uniformBuffer = device.createBuffer({ size: 64, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
-    bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: texture.createView() }, { binding: 3, resource: curveTextureView }] });
+    
+    bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }] });
+    exportBindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: fullResTexture.createView() }, { binding: 3, resource: curveTextureView }] });
+    
     const histModule = device.createShaderModule({ code: histShaderCode }); computePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: histModule, entryPoint: 'main' } });
     histogramBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }); readbackBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
-    computeBindGroup = device.createBindGroup({ layout: computePipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: texture.createView() }, { binding: 3, resource: curveTextureView }, { binding: 4, resource: { buffer: histogramBuffer } }] });
+    computeBindGroup = device.createBindGroup({ layout: computePipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }, { binding: 4, resource: { buffer: histogramBuffer } }] });
     
-    setHasImage(true); 
-    props.onImageChange?.(true); // NOTIFY APP THAT GLOBAL IMAGE IS MOUNTED
-    
-    const scaleX = (containerRef.clientWidth - 40) / imgBitmap.width; const scaleY = (containerRef.clientHeight - 40) / imgBitmap.height; setScale(Math.min(scaleX, scaleY)); renderFrame();
+    setHasImage(true); props.onImageChange?.(true);
+    const scaleX = (containerRef.clientWidth - 40) / pWidth; const scaleY = (containerRef.clientHeight - 40) / pHeight; setScale(Math.min(scaleX, scaleY)); renderFrame();
   };
 
-  const renderFrame = () => {
+  const renderFrame = (isExport = false) => {
     if (!device || !context || !pipeline || !hasImage()) return;
     if (props.curves) { const lut = generateToneCurveLUT(props.curves.master, props.curves.red, props.curves.green, props.curves.blue); device.queue.writeTexture({ texture: curveTexture }, lut, { bytesPerRow: 1024 }, [256, 1, 1]); }
     
@@ -59,7 +109,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
       if (containerWidth > 0) {
         const dividerX = containerWidth * splitPos();
         const canvasCenterX = containerWidth / 2 + offset().x;
-        const canvasDisplayWidth = canvasRef.width * scale();
+        const canvasDisplayWidth = (isExport ? imgBitmap.width : pWidth) * scale();
         const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
         shaderSplitPos = (dividerX - canvasLeft) / canvasDisplayWidth;
       }
@@ -70,15 +120,18 @@ export const Viewport: Component<ViewportProps> = (props) => {
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
       props.isCompare ? 1.0 : 0.0, shaderSplitPos, 0
     ]);
-    device.queue.writeBuffer(uniformBuffer, 0, paramsArray); device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(1024));
+    device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
     const commandEncoder = device.createCommandEncoder();
-    const computePass = commandEncoder.beginComputePass(); computePass.setPipeline(computePipeline); computePass.setBindGroup(0, computeBindGroup); computePass.dispatchWorkgroups(Math.ceil((canvasRef.width / 4) / 16), Math.ceil((canvasRef.height / 4) / 16)); computePass.end();
     
-    // Clear value relies on transparent color to allow canvas background to shine through naturally
-    const passEncoder = commandEncoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }, loadOp: 'clear', storeOp: 'store' }] }); passEncoder.setPipeline(pipeline); passEncoder.setBindGroup(0, bindGroup); passEncoder.draw(6); passEncoder.end();
+    if (!isExport) {
+      device.queue.writeBuffer(histogramBuffer, 0, new Uint32Array(1024));
+      const computePass = commandEncoder.beginComputePass(); computePass.setPipeline(computePipeline); computePass.setBindGroup(0, computeBindGroup); computePass.dispatchWorkgroups(Math.ceil((pWidth / 4) / 16), Math.ceil((pHeight / 4) / 16)); computePass.end();
+    }
     
-    if (!isReadingHistogram) { commandEncoder.copyBufferToBuffer(histogramBuffer, 0, readbackBuffer, 0, 4096); } device.queue.submit([commandEncoder.finish()]);
-    if (!isReadingHistogram && readbackBuffer.mapState === 'unmapped') { isReadingHistogram = true; readbackBuffer.mapAsync(GPUMapMode.READ).then(() => { const array = new Uint32Array(readbackBuffer.getMappedRange()); props.onHistogramUpdate(Array.from(array)); readbackBuffer.unmap(); isReadingHistogram = false; }).catch(() => { isReadingHistogram = false; }); }
+    const passEncoder = commandEncoder.beginRenderPass({ colorAttachments: [{ view: context.getCurrentTexture().createView(), clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 0.0 }, loadOp: 'clear', storeOp: 'store' }] }); passEncoder.setPipeline(pipeline); passEncoder.setBindGroup(0, isExport ? exportBindGroup : bindGroup); passEncoder.draw(6); passEncoder.end();
+    
+    if (!isExport && !isReadingHistogram) { commandEncoder.copyBufferToBuffer(histogramBuffer, 0, readbackBuffer, 0, 4096); } device.queue.submit([commandEncoder.finish()]);
+    if (!isExport && !isReadingHistogram && readbackBuffer.mapState === 'unmapped') { isReadingHistogram = true; readbackBuffer.mapAsync(GPUMapMode.READ).then(() => { const array = new Uint32Array(readbackBuffer.getMappedRange()); props.onHistogramUpdate(Array.from(array)); readbackBuffer.unmap(); isReadingHistogram = false; }).catch(() => { isReadingHistogram = false; }); }
   };
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -87,14 +140,15 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (rx < 0 || rx > 1 || ry < 0 || ry > 1) { props.onHoverLuminance(null); return; }
     const rot = rotation(); if (rot === 90) { const tmp = rx; rx = ry; ry = 1 - tmp; } else if (rot === 180) { rx = 1 - rx; ry = 1 - ry; } else if (rot === 270) { const tmp = rx; rx = 1 - ry; ry = tmp; }
     if (flipX() === -1) rx = 1 - rx; if (flipY() === -1) ry = 1 - ry;
-    const imgX = Math.floor(rx * canvasRef.width); const imgY = Math.floor(ry * canvasRef.height);
+    
+    const imgX = Math.floor(rx * imgBitmap.width); const imgY = Math.floor(ry * imgBitmap.height);
     try {
       let shaderSplitPos = splitPos();
       if (containerRef) {
         const containerWidth = containerRef.clientWidth;
         const dividerX = containerWidth * splitPos();
         const canvasCenterX = containerWidth / 2 + offset().x;
-        const canvasDisplayWidth = canvasRef.width * scale();
+        const canvasDisplayWidth = pWidth * scale();
         const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
         shaderSplitPos = (dividerX - canvasLeft) / canvasDisplayWidth;
       }
@@ -112,12 +166,33 @@ export const Viewport: Component<ViewportProps> = (props) => {
     } catch { props.onHoverLuminance(null); }
   };
 
-  props.getExportFn(() => { if (!device || !hasImage() || !canvasRef) return; renderFrame(); const dataUrl = canvasRef.toDataURL('image/png'); const link = document.createElement('a'); link.download = 'aftertone-processed.png'; link.href = dataUrl; link.click(); });
+  props.getExportFn(async () => { 
+    if (!device || !hasImage() || !canvasRef || !imgBitmap) return; 
+    canvasRef.width = imgBitmap.width; 
+    canvasRef.height = imgBitmap.height; 
+    const format = navigator.gpu.getPreferredCanvasFormat();
+    context.configure({ device, format, alphaMode: 'premultiplied' }); 
+    
+    renderFrame(true); 
+    await device.queue.onSubmittedWorkDone();
+    
+    const dataUrl = canvasRef.toDataURL('image/png'); 
+    const link = document.createElement('a'); 
+    link.download = 'aftertone-processed.png'; 
+    link.href = dataUrl; 
+    link.click(); 
+    
+    canvasRef.width = pWidth; 
+    canvasRef.height = pHeight; 
+    context.configure({ device, format, alphaMode: 'premultiplied' }); 
+    renderFrame(false);
+  });
+  
   props.getImportFn(() => fileInputRef.click());
 
   createEffect(() => { 
     const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.curves, props.isCompare, splitPos(), scale(), offset(), rotation(), flipX(), flipY()]; 
-    renderFrame(); 
+    renderFrame(false); 
   });
   
   const handleFileUpload = async (e: Event) => { const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return; const bmp = await createImageBitmap(file); initWebGPU(bmp); };
@@ -129,7 +204,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, display: hasImage() ? 'block' : 'none', 'box-shadow': '0 10px 50px rgba(0,0,0,0.8)', transition: 'transform 0.1s cubic-bezier(0.2, 0, 0, 1)' }} />
       
-      {/* MONOLITHIC REMAPPED INTERACTIVE SPLIT CONTROL */}
       {props.isCompare && hasImage() && (
         <div 
           onPointerDown={(e) => { 
@@ -158,7 +232,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
         </div>
       )}
       
-      {/* DYNAMIC CANVAS BACKGROUND COLOR PICKER */}
       <div style={{ position: 'absolute', bottom: '16px', right: '16px', 'z-index': 50 }}>
         {showBgMenu() && (
           <div style={{ position: 'absolute', bottom: '100%', right: '0', 'margin-bottom': '8px', background: '#1c1c1c', border: '1px solid #333', 'border-radius': '6px', padding: '8px', display: 'flex', 'flex-direction': 'column', gap: '6px', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)', width: '150px' }}>
