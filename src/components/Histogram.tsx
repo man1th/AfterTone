@@ -42,10 +42,15 @@ export const Histogram: Component<HistogramProps> = (props) => {
     <div style={{ width: '100%' }}>
       <div style={{ width: '100%', height: '110px', background: '#141414', border: '1px solid #282828', 'border-radius': '4px', position: 'relative', overflow: 'hidden' }}>
         <svg viewBox="0 0 100 100" preserveAspectRatio="none" style={{ width: '100%', height: '100%' }}>
-          {/* ACCURATE TARGET AREA REGIONS ONLY FOR EXPOSURE, HIGHLIGHTS, SHADOWS */}
+          {/* SLIDER REGION OVERLAYS */}
           {props.activeSlider?.name === 'Shadows' && <rect x="0" y="0" width="35%" height="100%" fill="rgba(255, 255, 255, 0.09)" />}
           {props.activeSlider?.name === 'Exposure' && <rect x="35%" y="0" width="30%" height="100%" fill="rgba(255, 255, 255, 0.09)" />}
           {props.activeSlider?.name === 'Highlights' && <rect x="65%" y="0" width="35%" height="100%" fill="rgba(255, 255, 255, 0.09)" />}
+          
+          {/* DYNAMIC THRESHOLD VISUALIZER FOR HALATION */}
+          {props.activeSlider?.name === 'Threshold' && (
+            <rect x={`${props.activeSlider.value}%`} y="0" width={`${100 - props.activeSlider.value}%`} height="100%" fill="rgba(255, 255, 255, 0.2)" />
+          )}
 
           <path d={paths().l} fill="rgba(85, 85, 85, 0.35)" stroke="none" />
           <path d={paths().r} fill="none" stroke="#ff4b4b" stroke-width="0.4" stroke-linejoin="round" stroke-linecap="round" opacity="0.9" style={{ 'mix-blend-mode': 'screen' }} />
@@ -55,13 +60,12 @@ export const Histogram: Component<HistogramProps> = (props) => {
         </svg>
       </div>
       
-      {/* 100% DEFENSIVE SAFE REGION - PREVENTS VALUE READ ERROR ON RENDER BATCHES */}
       <div style={{ display: 'flex', 'justify-content': 'space-between', 'margin-top': '8px', 'font-size': '10px', color: '#b0b0b0', 'font-weight': '400', 'text-transform': 'capitalize', 'letter-spacing': '0.5px' }}>
         {props.activeSlider && props.activeSlider.name ? (
           <>
             <span style={{ flex: 1, 'text-align': 'left' }}>{props.activeSlider?.name || ''}</span>
             <span style={{ flex: 1, 'text-align': 'right' }}>
-              {props.activeSlider?.value !== null && props.activeSlider?.value !== undefined && props.activeSlider.value > 0 
+              {props.activeSlider?.value !== null && props.activeSlider?.value !== undefined && props.activeSlider.value > 0 && props.activeSlider.name !== 'Threshold' && props.activeSlider.name !== 'Radius (px)'
                 ? `+${props.activeSlider.value}` 
                 : props.activeSlider?.value ?? ''}
             </span>

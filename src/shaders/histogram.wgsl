@@ -1,62 +1,59 @@
 struct LightParams {
     exposure: f32, contrast: f32, highlights: f32, shadows: f32, whites: f32, blacks: f32,
-    texture_adj: f32, clarity: f32, dehaze: f32,
-    temp: f32, tint: f32, vibrance: f32, saturation: f32,
-    pad1: f32, pad2: f32, pad3: f32
+    texture_adj: f32, clarity: f32, dehaze: f32, temp: f32, tint: f32, vibrance: f32, saturation: f32,
+    is_compare: f32, split_pos: f32, hal_thresh: f32,
+    hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
+    bloom_intensity: f32, show_hal_map: f32, is_interacting: f32,
+    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
 @group(0) @binding(1) var mySampler: sampler;
 @group(0) @binding(2) var myTexture: texture_2d<f32>;
 @group(0) @binding(3) var curveTex: texture_2d<f32>;
-@group(0) @binding(4) var<storage, read_write> bins: array<atomic<u32>, 1024>;
+@group(0) @binding(4) var<storage, read_write> histBuffer: array<atomic<u32>>;
+
+fn getLuma(rgb: vec3<f32>) -> f32 { return dot(rgb, vec3<f32>(0.299, 0.587, 0.114)); }
 
 @compute @workgroup_size(16, 16)
-fn main(@builtin(global_invocation_id) id: vec3<u32>) {
-    let dims = vec2<f32>(textureDimensions(myTexture));
-    let x = f32(id.x * 4u); let y = f32(id.y * 4u);
-    if (x >= dims.x || y >= dims.y) { return; }
+fn main(@builtin(global_invocation_id) global_id: vec3<u32>) {
+    let dims = textureDimensions(myTexture);
+    let coords = vec2<u32>(global_id.x * 4u, global_id.y * 4u);
+    if (coords.x >= dims.x || coords.y >= dims.y) { return; }
 
-    var rgb = textureSampleLevel(myTexture, mySampler, vec2<f32>(x, y) / dims, 0.0).rgb;
-
-    let t_val = params.temp / 100.0; let tint_val = params.tint / 100.0;
-    rgb.r = rgb.r * (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08));
-    rgb.g = rgb.g * (1.0 - (tint_val * 0.14));
-    rgb.b = rgb.b * (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08));
+    let uv = vec2<f32>(coords) / vec2<f32>(dims);
+    var color = textureSampleLevel(myTexture, mySampler, uv, 0.0);
+    var rgb = color.rgb;
 
     rgb = rgb * exp2(params.exposure / 50.0);
-    rgb = (rgb - vec3<f32>(0.5)) * ((params.contrast / 100.0) + 1.0) + vec3<f32>(0.5);
+    let c = (params.contrast / 100.0) + 1.0;
+    rgb = (rgb - vec3<f32>(0.5)) * c + vec3<f32>(0.5);
 
-    let luma = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
-    rgb = rgb + (rgb * (params.shadows / 100.0) * (1.0 - smoothstep(0.0, 0.5, luma)));
-    rgb = rgb + (rgb * (params.highlights / 100.0) * smoothstep(0.5, 1.0, luma));
+    let luma = getLuma(rgb);
+    let shadowMask = 1.0 - smoothstep(0.0, 0.5, luma);
+    let highlightMask = smoothstep(0.5, 1.0, luma);
+    rgb = rgb + (rgb * (params.shadows / 100.0) * shadowMask);
+    rgb = rgb + (rgb * (params.highlights / 100.0) * highlightMask);
     
-    let w_p = 1.0 - (params.whites / 200.0); let b_p = 0.0 - (params.blacks / 200.0);
-    rgb = (rgb - vec3<f32>(b_p)) / vec3<f32>(w_p - b_p);
-    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
+    let whitePoint = 1.0 - (params.whites / 200.0);
+    let blackPoint = 0.0 - (params.blacks / 200.0);
+    rgb = (rgb - vec3<f32>(blackPoint)) / vec3<f32>(whitePoint - blackPoint);
 
-    // Process through Master Curve
+    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).a;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).a;
     rgb.b = textureLoad(curveTex, vec2<i32>(i32(rgb.b * 255.0), 0), 0).a;
-
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    
-    // Process through RGB Channels
     rgb.r = textureLoad(curveTex, vec2<i32>(i32(rgb.r * 255.0), 0), 0).r;
     rgb.g = textureLoad(curveTex, vec2<i32>(i32(rgb.g * 255.0), 0), 0).g;
     rgb.b = textureLoad(curveTex, vec2<i32>(i32(rgb.b * 255.0), 0), 0).b;
 
-    rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-    let finalLuma = dot(rgb, vec3<f32>(0.299, 0.587, 0.114));
+    let final_luma = getLuma(rgb);
+    let r_idx = min(u32(rgb.r * 255.0), 255u);
+    let g_idx = min(u32(rgb.g * 255.0), 255u) + 256u;
+    let b_idx = min(u32(rgb.b * 255.0), 255u) + 512u;
+    let l_idx = min(u32(final_luma * 255.0), 255u) + 768u;
 
-    let r_bin = clamp(u32(rgb.r * 255.0), 0u, 255u);
-    let g_bin = clamp(u32(rgb.g * 255.0), 0u, 255u);
-    let b_bin = clamp(u32(rgb.b * 255.0), 0u, 255u);
-    let l_bin = clamp(u32(finalLuma * 255.0), 0u, 255u);
-
-    atomicAdd(&bins[r_bin], 1u);
-    atomicAdd(&bins[256u + g_bin], 1u);
-    atomicAdd(&bins[512u + b_bin], 1u);
-    atomicAdd(&bins[768u + l_bin], 1u);
+    atomicAdd(&histBuffer[r_idx], 1u); atomicAdd(&histBuffer[g_idx], 1u);
+    atomicAdd(&histBuffer[b_idx], 1u); atomicAdd(&histBuffer[l_idx], 1u);
 }
