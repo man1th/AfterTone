@@ -1,10 +1,9 @@
 struct LightParams {
     exposure: f32, contrast: f32, highlights: f32, shadows: f32, whites: f32, blacks: f32,
     texture_adj: f32, clarity: f32, dehaze: f32, temp: f32, tint: f32, vibrance: f32, saturation: f32,
-    is_compare: f32, split_pos: f32, hal_thresh: f32,
-    hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
+    hal_thresh: f32, hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
     bloom_intensity: f32, show_hal_map: f32, is_interacting: f32,
-    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32
+    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32, pad9: f32, pad10: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;

@@ -1,10 +1,9 @@
 struct LightParams {
     exposure: f32, contrast: f32, highlights: f32, shadows: f32, whites: f32, blacks: f32,
     texture_adj: f32, clarity: f32, dehaze: f32, temp: f32, tint: f32, vibrance: f32, saturation: f32,
-    is_compare: f32, split_pos: f32, hal_thresh: f32,
-    hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
+    hal_thresh: f32, hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
     bloom_intensity: f32, show_hal_map: f32, is_interacting: f32,
-    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32
+    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32, pad9: f32, pad10: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
@@ -23,6 +22,11 @@ fn vs_main(@builtin(vertex_index) vertexIndex: u32) -> VertexOutput {
 
 fn getLuma(rgb: vec3<f32>) -> f32 { return dot(rgb, vec3<f32>(0.299, 0.587, 0.114)); }
 
+fn ign(v: vec2<f32>) -> f32 {
+    var magic = vec3<f32>(0.06711056, 0.00583715, 52.9829189);
+    return fract(magic.z * fract(dot(v, magic.xy)));
+}
+
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let dims = vec2<f32>(textureDimensions(myTexture));
@@ -39,7 +43,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let exp_mult = exp2(params.exposure / 50.0);
     rgb = rgb * exp_mult;
     
-    // BINARY BITMAP OVERRIDE (Instantly calculates exact PS threshold zone)
     if (params.show_hal_map > 0.5) {
         let thresh = params.hal_thresh / 100.0;
         let bw_mask = step(thresh, getLuma(rgb));
@@ -86,26 +89,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 
     let aspect_ratio = dims.y / dims.x;
     let GOLDEN_ANGLE = 2.3999632;
+    let noise = ign(in.position.xy);
+    let random_rotation = noise * 6.2831853; 
 
+    // PHOTOSHOP HALATION WORKFLOW
     if (params.hal_intensity > 0.0 && params.hal_radius > 0.0) {
         var blur_accum = vec3<f32>(0.0);
         var weight_sum = 0.0;
-        let H_TAPS = 100.0; 
         
-        // ADAPTIVE LOD GOVERNOR: Down-samples to 17-taps during interaction for 60FPS
-        let h_stride = select(1.0, 6.0, params.is_interacting > 0.5);
+        let H_TAPS = 32.0; 
+        let h_stride = select(1.0, 3.0, params.is_interacting > 0.5);
         let thresh = params.hal_thresh / 100.0;
-        
         let sigma = max(params.hal_radius, 1.0) / 3.0; 
         let two_sigma_sq = 2.0 * sigma * sigma;
 
         for (var i = 0.0; i < H_TAPS; i += h_stride) {
-            let r_frac = sqrt(i) / sqrt(H_TAPS);
-            let theta = i * GOLDEN_ANGLE;
+            let r_frac = sqrt(i + noise) / sqrt(H_TAPS);
+            let theta = i * GOLDEN_ANGLE + random_rotation;
             let pt = vec2<f32>(cos(theta) * aspect_ratio, sin(theta)) * r_frac;
             
             let sample_uv = in.uv + pt * (params.hal_radius / dims.x);
             let s_rgb = textureSample(myTexture, mySampler, sample_uv).rgb * exp_mult;
+
             let s_luma = getLuma(s_rgb);
             let mask = smoothstep(thresh - 0.05, thresh + 0.05, s_luma);
             let thresh_color = s_rgb * mask;
@@ -133,22 +138,19 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         rgb = 1.0 - (1.0 - rgb) * (1.0 - final_halation);
     }
 
+    // BLOOM WORKFLOW
     if (params.bloom_intensity > 0.0) {
         var bloom_accum = vec3<f32>(0.0);
         var b_weight_sum = 0.0;
-        let B_TAPS = 64.0;
-        
-        // ADAPTIVE LOD GOVERNOR: Down-samples to 16-taps during interaction for 60FPS
-        let b_stride = select(1.0, 4.0, params.is_interacting > 0.5);
+        let B_TAPS = 24.0;
+        let b_stride = select(1.0, 3.0, params.is_interacting > 0.5);
         
         for (var i = 0.0; i < B_TAPS; i += b_stride) {
-            let r_frac = sqrt(i) / sqrt(B_TAPS);
-            let theta = i * GOLDEN_ANGLE;
+            let r_frac = sqrt(i + noise) / sqrt(B_TAPS);
+            let theta = i * GOLDEN_ANGLE + random_rotation;
             let pt = vec2<f32>(cos(theta) * aspect_ratio, sin(theta)) * r_frac;
-            
             let sample_uv = in.uv + pt * 0.05;
             let s_rgb = textureSample(myTexture, mySampler, sample_uv).rgb * exp_mult;
-            
             let b_weight = exp(-(r_frac * r_frac * 6.0));
             bloom_accum += s_rgb * b_weight;
             b_weight_sum += b_weight;
@@ -169,13 +171,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     rgb = mix(vec3<f32>(getLuma(rgb)), rgb, max(0.0, (1.0 + (params.saturation / 100.0)) * vib_scale));
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    if (params.is_compare > 0.5) {
-        if (in.uv.x < params.split_pos) {
-            rgb = color.rgb; 
-        } else if (abs(in.uv.x - params.split_pos) < dx * 1.5) {
-            rgb = vec3<f32>(0.85); 
-        }
-    }
+    // NOTE: Spatial compare logic is entirely stripped out of the shader for performance!
 
     return vec4<f32>(rgb, color.a);
 }
