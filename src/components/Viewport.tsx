@@ -66,7 +66,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
     curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST }); curveTextureView = curveTexture.createView();
     const module = device.createShaderModule({ code: shaderCode }); pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs_main' }, fragment: { module, entryPoint: 'fs_main', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     
-    uniformBuffer = device.createBuffer({ size: 128, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    // EXACTLY 48 FLOATS (192 BYTES) FOR FULL COLOR GRADING MAP
+    uniformBuffer = device.createBuffer({ size: 192, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }] });
     exportBindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: fullResTexture.createView() }, { binding: 3, resource: curveTextureView }] });
     const histModule = device.createShaderModule({ code: histShaderCode }); computePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: histModule, entryPoint: 'main' } });
@@ -102,16 +103,18 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const p = props.lightState; const active = p.enabled;
     const [hr, hg, hb] = hexToRgb(p.hal_color || '#ff3300');
 
-    // SCALED GRAIN ENGINE PARAMS
+    // 48-FLOAT EXACT ARRAY MAPPING
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
       active ? p.hal_thresh : 80, active ? p.hal_radius : 10, hr, hg, hb, active ? p.hal_intensity : 0,
       active ? p.bloom_intensity : 0, p.show_hal_map ? 1.0 : 0.0, isInteracting,
-      active ? (p.grain_amount || 0) / 100.0 : 0.0,
-      (p.grain_size || 0) / 25.0 + 0.1,
-      (p.grain_roughness || 0) / 100.0,
-      (p.grain_color_variance || 0) / 100.0,
-      0, 0, 0, 0, 0, 0
+      active ? (p.grain_amount || 0) / 100.0 : 0.0, (p.grain_size || 0) / 25.0 + 0.1, (p.grain_roughness || 0) / 100.0, (p.grain_color_variance || 0) / 100.0,
+      // COLOR GRADING PARAMETERS
+      active ? p.cg_s_h : 0, active ? p.cg_s_s : 0, active ? p.cg_s_l : 0,
+      active ? p.cg_m_h : 0, active ? p.cg_m_s : 0, active ? p.cg_m_l : 0,
+      active ? p.cg_h_h : 0, active ? p.cg_h_s : 0, active ? p.cg_h_l : 0,
+      active ? p.cg_g_h : 0, active ? p.cg_g_s : 0, active ? p.cg_g_l : 0,
+      0, 0, 0, 0, 0, 0, 0, 0, 0, 0 // 10 padding floats
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
     
@@ -144,16 +147,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const imgX = Math.floor(rx * imgBitmap.width); const imgY = Math.floor(ry * imgBitmap.height);
     try {
       const p = offscreenCtx.getImageData(imgX, imgY, 1, 1).data; let r = p[0] / 255; let g = p[1] / 255; let b = p[2] / 255;
-      const uvSplit = getImageSplitPercentage() / 100;
-      if (props.lightState.enabled && (!props.isCompare || rx >= uvSplit)) {
-        const l = props.lightState; const t_val = l.temp / 100; const tint_val = l.tint / 100; r *= (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); g *= (1.0 - (tint_val * 0.14)); b *= (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); const exp = Math.pow(2, l.exposure / 50); r *= exp; g *= exp; b *= exp; const c = (l.contrast / 100) + 1; r = (r - 0.5) * c + 0.5; g = (g - 0.5) * c + 0.5; b = (b - 0.5) * c + 0.5;
-        const baseLuma = 0.299 * r + 0.587 * g + 0.114 * b; const sMask = 1.0 - Math.max(0, Math.min(1, baseLuma / 0.5)); const hMask = Math.max(0, Math.min(1, (baseLuma - 0.5) / 0.5)); r += r * (l.shadows / 100) * sMask + r * (l.highlights / 100) * hMask; g += g * (l.shadows / 100) * sMask + g * (l.highlights / 100) * hMask; b += b * (l.shadows / 100) * sMask + b * (l.highlights / 100) * hMask;
-        const w_p = 1.0 - (l.whites / 200); const b_p = 0.0 - (l.blacks / 200); r = (r - b_p) / (w_p - b_p); g = (g - b_p) / (w_p - b_p); b = (b - b_p) / (w_p - b_p);
-      }
-      if (props.curves && (!props.isCompare || rx >= uvSplit)) {
-        const evalM = buildMonotonicCubicSpline(props.curves.master); r = evalM(Math.max(0, Math.min(1, r))); g = evalM(Math.max(0, Math.min(1, g))); b = evalM(Math.max(0, Math.min(1, b)));
-        r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r))); g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, r))); b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
-      }
       const finalLuma = Math.max(0, Math.min(1, 0.299 * r + 0.587 * g + 0.114 * b)); props.onHoverLuminance(finalLuma);
     } catch { props.onHoverLuminance(null); }
   };
@@ -169,7 +162,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
   props.getImportFn(() => fileInputRef.click());
 
   createEffect(() => { 
-      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.curves]; 
+      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.lightState.cg_s_h, props.lightState.cg_s_s, props.lightState.cg_s_l, props.lightState.cg_m_h, props.lightState.cg_m_s, props.lightState.cg_m_l, props.lightState.cg_h_h, props.lightState.cg_h_s, props.lightState.cg_h_l, props.lightState.cg_g_h, props.lightState.cg_g_s, props.lightState.cg_g_l, props.curves]; 
       renderFrame(false); 
   });
   

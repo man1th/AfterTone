@@ -7,7 +7,7 @@ import { Histogram } from './components/Histogram';
 import { ToneCurve, CurveState } from './components/ToneCurve';
 
 declare const window: any;
-type PanelId = 'histogram' | 'wb' | 'exposure' | 'hdr' | 'clarity' | 'dehaze' | 'curve' | 'texture' | 'bloom' | 'halation' | 'grain';
+type PanelId = 'histogram' | 'wb' | 'exposure' | 'hdr' | 'clarity' | 'dehaze' | 'curve' | 'texture' | 'bloom' | 'halation' | 'grain' | 'color_grading';
 
 const NavBtn: Component<{ icon: string, label: string, onClick?: () => void, active?: boolean, disabled?: boolean }> = (props) => (
   <button onClick={props.onClick} disabled={props.disabled} style={{ opacity: props.disabled ? 0.35 : 1, pointerEvents: props.disabled ? 'none' : 'auto', background: props.active ? '#2a2a2a' : 'transparent', border: 'none', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', 'justify-content': 'center', gap: '4px', cursor: props.disabled ? 'default' : 'pointer', padding: '6px 14px', 'border-radius': '6px', transition: 'background 0.15s ease' }}>
@@ -16,22 +16,127 @@ const NavBtn: Component<{ icon: string, label: string, onClick?: () => void, act
   </button>
 );
 
+// --- 10X LIGHTROOM COLOR WHEEL UI COMPONENT ---
+const ColorWheelControl: Component<{ h: number, s: number, disabled: boolean, onChange: (h: number, s: number) => void }> = (props) => {
+  let wheelRef!: HTMLDivElement;
+  let dragMode: 'inner' | 'outer' | null = null;
+  
+  const handleDrag = (e: any) => {
+    if (!dragMode || props.disabled || !wheelRef) return;
+    const rect = wheelRef.getBoundingClientRect();
+    const cx = rect.width / 2; const cy = rect.height / 2;
+    const dx = e.clientX - rect.left - cx; const dy = e.clientY - rect.top - cy;
+    
+    let angle = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (angle < 0) angle += 360;
+    
+    if (dragMode === 'outer') {
+      props.onChange(Math.round(angle), props.s);
+    } else {
+      const maxR = 60; // Max radius of inner gradient wheel
+      const r = Math.min(maxR, Math.sqrt(dx * dx + dy * dy));
+      props.onChange(Math.round(angle), Math.round((r / maxR) * 100));
+    }
+  };
+
+  const CENTER = 80;
+  const R_OUTER = 70;
+  const R_INNER = 60;
+
+  const innerPos = () => {
+     const r = (props.s / 100) * R_INNER;
+     const rad = props.h * Math.PI / 180;
+     return { x: CENTER + r * Math.cos(rad), y: CENTER + r * Math.sin(rad) };
+  };
+
+  const outerPos = () => {
+     const rad = props.h * Math.PI / 180;
+     return { x: CENTER + R_OUTER * Math.cos(rad), y: CENTER + R_OUTER * Math.sin(rad) };
+  };
+
+  return (
+    <div style={{ display: 'flex', 'justify-content': 'center', 'padding': '16px 0', opacity: props.disabled ? 0.4 : 1, 'pointer-events': props.disabled ? 'none' : 'auto' }}>
+      <div 
+        ref={wheelRef}
+        onPointerDown={(e) => { 
+            const rect = wheelRef.getBoundingClientRect();
+            const cx = rect.width / 2; const cy = rect.height / 2;
+            const dx = e.clientX - rect.left - cx; const dy = e.clientY - rect.top - cy;
+            const dist = Math.sqrt(dx * dx + dy * dy);
+            dragMode = dist > R_INNER ? 'outer' : 'inner';
+            e.currentTarget.setPointerCapture(e.pointerId); 
+            handleDrag(e); 
+        }}
+        onPointerMove={handleDrag}
+        onPointerUp={(e) => { dragMode = null; e.currentTarget.releasePointerCapture(e.pointerId); }}
+        style={{ width: '160px', height: '160px', position: 'relative', cursor: 'crosshair', 'touch-action': 'none' }}
+      >
+        {/* Outer Ring Track */}
+        <div style={{ position: 'absolute', top: '10px', left: '10px', right: '10px', bottom: '10px', 'border-radius': '50%', border: '4px solid #222' }}></div>
+        
+        {/* Inner Gradient Wheel (Clockwise: Red -> Yellow -> Green -> Cyan -> Blue -> Magenta) */}
+        <div style={{ position: 'absolute', top: '20px', left: '20px', right: '20px', bottom: '20px', 'border-radius': '50%', background: 'radial-gradient(circle, #808080 0%, rgba(128,128,128,0) 65%), conic-gradient(from 90deg, red, yellow, lime, cyan, blue, magenta, red)', 'box-shadow': '0 4px 12px rgba(0,0,0,0.5)' }}></div>
+        
+        {/* Outer Hue Knob */}
+        <div style={{ position: 'absolute', left: `${outerPos().x}px`, top: `${outerPos().y}px`, width: '12px', height: '12px', background: `hsl(${props.h}, 100%, 50%)`, 'border-radius': '50%', border: '2px solid #fff', transform: 'translate(-50%, -50%)', 'box-shadow': '0 2px 4px rgba(0,0,0,0.5)', 'pointer-events': 'none' }}></div>
+        
+        {/* Inner Saturation + Hue Knob */}
+        <div style={{ position: 'absolute', left: `${innerPos().x}px`, top: `${innerPos().y}px`, width: '10px', height: '10px', background: 'transparent', 'border-radius': '50%', border: '2px solid #fff', transform: 'translate(-50%, -50%)', 'box-shadow': '0 1px 3px rgba(0,0,0,0.8)', 'pointer-events': 'none' }}></div>
+      </div>
+    </div>
+  );
+};
+
+const ColorGradingPanel: Component<{ state: any, bypassed: boolean, update: (field: string, val: number) => void }> = (props) => {
+  const [activeTab, setActiveTab] = createSignal<'s' | 'm' | 'h' | 'g'>('s');
+  const tabs = [ { id: 's', label: 'Shadows' }, { id: 'm', label: 'Midtones' }, { id: 'h', label: 'Highlights' }, { id: 'g', label: 'Global' } ];
+
+  return (
+    <div style={{ padding: '12px 14px' }}>
+      <div style={{ display: 'flex', 'border-bottom': '1px solid #333', 'margin-bottom': '8px' }}>
+        {tabs.map(t => (
+          <button 
+            onClick={() => setActiveTab(t.id as any)} 
+            style={{ flex: 1, background: 'none', border: 'none', 'border-bottom': activeTab() === t.id ? '2px solid #aaa' : '2px solid transparent', color: activeTab() === t.id ? '#ddd' : '#666', 'font-size': '10px', 'font-weight': '400', padding: '6px 0', cursor: 'pointer', transition: 'all 0.15s' }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+      
+      <ColorWheelControl 
+        h={props.state[`cg_${activeTab()}_h`]} 
+        s={props.state[`cg_${activeTab()}_s`]} 
+        disabled={props.bypassed} 
+        onChange={(h, s) => { props.update(`cg_${activeTab()}_h`, h); props.update(`cg_${activeTab()}_s`, s); }} 
+      />
+      
+      <div style={{ display: 'flex', 'flex-direction': 'column', gap: '6px' }}>
+        <Slider label="Hue" value={props.state[`cg_${activeTab()}_h`]} min={0} max={360} disabled={props.bypassed} onChange={(v) => props.update(`cg_${activeTab()}_h`, Math.round(v))} />
+        <Slider label="Saturation" value={props.state[`cg_${activeTab()}_s`]} min={0} max={100} disabled={props.bypassed} onChange={(v) => props.update(`cg_${activeTab()}_s`, Math.round(v))} />
+        <Slider label="Luminance" value={props.state[`cg_${activeTab()}_l`]} min={-100} max={100} disabled={props.bypassed} onChange={(v) => props.update(`cg_${activeTab()}_l`, Math.round(v))} />
+      </div>
+    </div>
+  );
+};
+
 const App: Component = () => {
   const [lightState, setLightState] = createStore({ 
     exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, 
     hal_thresh: 85, hal_radius: 20, hal_intensity: 0, hal_color: '#ff3300', show_hal_map: false,
     bloom_intensity: 0,
     grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0,
+    cg_s_h: 210, cg_s_s: 0, cg_s_l: 0, cg_m_h: 30, cg_m_s: 0, cg_m_l: 0, cg_h_h: 45, cg_h_s: 0, cg_h_l: 0, cg_g_h: 0, cg_g_s: 0, cg_g_l: 0,
     enabled: true 
   });
   const [isWasmReady, setIsWasmReady] = createSignal(false); const [isCompare, setIsCompare] = createSignal(false); const [isOriginal, setIsOriginal] = createSignal(false);
   const [hasImage, setHasImage] = createSignal(false); 
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(1024).fill(0)); const [hoverLuminance, setHoverLuminance] = createSignal<number | null>(null); const [metadata, setMetadata] = createSignal({ iso: '---', shutter: '---', fstop: '---' });
   
-  const [panelOrder, setPanelOrder] = createSignal<PanelId[]>(['histogram', 'wb', 'exposure', 'hdr', 'clarity', 'dehaze', 'curve', 'texture', 'bloom', 'halation', 'grain']);
+  const [panelOrder, setPanelOrder] = createSignal<PanelId[]>(['histogram', 'wb', 'exposure', 'hdr', 'clarity', 'dehaze', 'curve', 'texture', 'color_grading', 'bloom', 'halation', 'grain']);
   const [draggedIndex, setDraggedIndex] = createSignal<number | null>(null);
-  const [expanded, setExpanded] = createStore<Record<PanelId, boolean>>({ histogram: true, wb: true, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false });
-  const [bypassed, setBypassed] = createStore<Record<string, boolean>>({ wb: false, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false });
+  const [expanded, setExpanded] = createStore<Record<PanelId, boolean>>({ histogram: true, wb: true, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false, color_grading: false });
+  const [bypassed, setBypassed] = createStore<Record<string, boolean>>({ wb: false, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false, color_grading: false });
   const [activeSliderName, setActiveSliderName] = createSignal<string | null>(null);
 
   const defaultCurves = (): CurveState => ({ master: [{x:0,y:0}, {x:1,y:1}], red: [{x:0,y:0}, {x:1,y:1}], green: [{x:0,y:0}, {x:1,y:1}], blue: [{x:0,y:0}, {x:1,y:1}] });
@@ -45,6 +150,10 @@ const App: Component = () => {
     hal_thresh: bypassed.halation ? 80 : lightState.hal_thresh, hal_radius: bypassed.halation ? 0 : lightState.hal_radius, hal_intensity: bypassed.halation ? 0 : lightState.hal_intensity, hal_color: lightState.hal_color, show_hal_map: lightState.show_hal_map,
     bloom_intensity: bypassed.bloom ? 0 : lightState.bloom_intensity,
     grain_amount: bypassed.grain ? 0 : lightState.grain_amount, grain_size: lightState.grain_size, grain_roughness: lightState.grain_roughness, grain_color_variance: lightState.grain_color_variance,
+    cg_s_h: bypassed.color_grading ? 0 : lightState.cg_s_h, cg_s_s: bypassed.color_grading ? 0 : lightState.cg_s_s, cg_s_l: bypassed.color_grading ? 0 : lightState.cg_s_l,
+    cg_m_h: bypassed.color_grading ? 0 : lightState.cg_m_h, cg_m_s: bypassed.color_grading ? 0 : lightState.cg_m_s, cg_m_l: bypassed.color_grading ? 0 : lightState.cg_m_l,
+    cg_h_h: bypassed.color_grading ? 0 : lightState.cg_h_h, cg_h_s: bypassed.color_grading ? 0 : lightState.cg_h_s, cg_h_l: bypassed.color_grading ? 0 : lightState.cg_h_l,
+    cg_g_h: bypassed.color_grading ? 0 : lightState.cg_g_h, cg_g_s: bypassed.color_grading ? 0 : lightState.cg_g_s, cg_g_l: bypassed.color_grading ? 0 : lightState.cg_g_l,
     enabled: lightState.enabled
   });
 
@@ -58,13 +167,14 @@ const App: Component = () => {
     return null; 
   };
   
-  const resetAllToOriginal = () => { setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, hal_thresh: 85, hal_radius: 20, hal_intensity: 0, bloom_intensity: 0, grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0 }); setCurves(defaultCurves()); };
+  const resetAllToOriginal = () => { setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, hal_thresh: 85, hal_radius: 20, hal_intensity: 0, bloom_intensity: 0, grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0, cg_s_h: 210, cg_s_s: 0, cg_s_l: 0, cg_m_h: 30, cg_m_s: 0, cg_m_l: 0, cg_h_h: 45, cg_h_s: 0, cg_h_l: 0, cg_g_h: 0, cg_g_s: 0, cg_g_l: 0 }); setCurves(defaultCurves()); };
 
   const panelMeta: Record<PanelId, { title: string, features: boolean, reset: () => void }> = {
     histogram: { title: 'Histogram', features: false, reset: () => {} }, wb: { title: 'White Balance', features: true, reset: () => setLightState({ temp: 0, tint: 0 }) }, exposure: { title: 'Exposure', features: true, reset: () => setLightState({ exposure: 0, contrast: 0, saturation: 0, vibrance: 0 }) }, hdr: { title: 'High Dynamic Range', features: true, reset: () => setLightState({ highlights: 0, shadows: 0, whites: 0, blacks: 0 }) }, clarity: { title: 'Clarity', features: true, reset: () => setLightState({ clarity: 0 }) }, dehaze: { title: 'Dehaze', features: true, reset: () => setLightState({ dehaze: 0 }) }, curve: { title: 'Tone Curve', features: true, reset: () => setCurves(defaultCurves()) }, texture: { title: 'Texture', features: true, reset: () => setLightState({ texture: 0 }) },
     halation: { title: 'Halation', features: true, reset: () => setLightState({ hal_thresh: 85, hal_radius: 20, hal_intensity: 0 }) },
     bloom: { title: 'Bloom', features: true, reset: () => setLightState({ bloom_intensity: 0 }) },
-    grain: { title: 'Film Grain', features: true, reset: () => setLightState({ grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0 }) }
+    grain: { title: 'Film Grain', features: true, reset: () => setLightState({ grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0 }) },
+    color_grading: { title: 'Colour Grading', features: true, reset: () => setLightState({ cg_s_h: 210, cg_s_s: 0, cg_s_l: 0, cg_m_h: 30, cg_m_s: 0, cg_m_l: 0, cg_h_h: 45, cg_h_s: 0, cg_h_l: 0, cg_g_h: 0, cg_g_s: 0, cg_g_l: 0 }) }
   };
 
   const renderContent = (id: PanelId) => {
@@ -92,6 +202,7 @@ const App: Component = () => {
       case 'curve': return <div style={{ padding: '16px 14px' }}><ToneCurve curves={curves()} setCurves={setCurves} disabled={bypassed.curve} /></div>;
       case 'texture': return <div style={{ padding: '16px 14px', display: 'flex', 'flex-direction': 'column', gap: '2px' }}><Slider label="Texture" value={lightState.texture} disabled={bypassed.texture} onChange={(v) => setLightState('texture', v)} /></div>;
       case 'bloom': return <div style={{ padding: '16px 14px', display: 'flex', 'flex-direction': 'column', gap: '2px' }}><Slider label="Intensity" value={lightState.bloom_intensity} min={0} max={100} disabled={bypassed.bloom} onChange={(v) => setLightState('bloom_intensity', v)} /></div>;
+      case 'color_grading': return <ColorGradingPanel state={lightState} bypassed={bypassed.color_grading} update={setLightState as any} />;
       case 'halation': return (
         <div style={{ padding: '16px 14px', display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
           <div style={{ display: 'flex', 'align-items': 'center', gap: '6px' }}>

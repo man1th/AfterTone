@@ -4,7 +4,11 @@ struct LightParams {
     hal_thresh: f32, hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
     bloom_intensity: f32, show_hal_map: f32, is_interacting: f32,
     grain_amount: f32, grain_size: f32, grain_roughness: f32, grain_color_variance: f32,
-    pad0: f32, pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32
+    cg_s_h: f32, cg_s_s: f32, cg_s_l: f32,
+    cg_m_h: f32, cg_m_s: f32, cg_m_l: f32,
+    cg_h_h: f32, cg_h_s: f32, cg_h_l: f32,
+    cg_g_h: f32, cg_g_s: f32, cg_g_l: f32,
+    pad0: f32, pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32, pad9: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
