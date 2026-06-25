@@ -75,7 +75,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     
     setHasImage(true); props.onImageChange?.(true);
     
-    // Fail-safe initialization dimension check to prevent zoomed-in locks
     setTimeout(() => {
       const cWidth = containerRef?.clientWidth || window.innerWidth - 350;
       const cHeight = containerRef?.clientHeight || window.innerHeight - 100;
@@ -103,11 +102,16 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const p = props.lightState; const active = p.enabled;
     const [hr, hg, hb] = hexToRgb(p.hal_color || '#ff3300');
 
+    // SCALED GRAIN ENGINE PARAMS
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
       active ? p.hal_thresh : 80, active ? p.hal_radius : 10, hr, hg, hb, active ? p.hal_intensity : 0,
       active ? p.bloom_intensity : 0, p.show_hal_map ? 1.0 : 0.0, isInteracting,
-      0, 0, 0, 0, 0, 0, 0, 0, 0, 0
+      active ? (p.grain_amount || 0) / 100.0 : 0.0,
+      (p.grain_size || 0) / 25.0 + 0.1,
+      (p.grain_roughness || 0) / 100.0,
+      (p.grain_color_variance || 0) / 100.0,
+      0, 0, 0, 0, 0, 0
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
     
@@ -165,7 +169,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
   props.getImportFn(() => fileInputRef.click());
 
   createEffect(() => { 
-      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.curves]; 
+      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.curves]; 
       renderFrame(false); 
   });
   
@@ -177,24 +181,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(28, 28, 28, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '2px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none', border: '1px solid #333' }}><button onClick={() => setScale(s => Math.min(30, s * 1.25))} style={iconBtnStyle}><ZoomIn size={15} /></button><button onClick={() => setScale(s => Math.max(0.05, s / 1.25))} style={iconBtnStyle}><ZoomOut size={15} /></button><button onClick={() => { setOffset({ x: 0, y: 0 }); const scaleX = ((containerRef?.clientWidth || window.innerWidth - 350) - 40) / pWidth; const scaleY = ((containerRef?.clientHeight || window.innerHeight - 100) - 40) / pHeight; setScale(Math.min(scaleX, scaleY)); }} style={iconBtnStyle}><Hand size={15} /></button><div style={{ width: '1px', background: '#444', margin: '4px' }}></div><button onClick={() => setRotation(r => (r + 90) % 360)} style={iconBtnStyle}><RotateCw size={15} /></button><button onClick={() => setFlipX(x => x * -1)} style={iconBtnStyle}><SquareCenterlineDashedHorizontal size={15} /></button><button onClick={() => setFlipY(y => y * -1)} style={iconBtnStyle}><SquareCenterlineDashedVertical size={15} /></button></div>
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
-      {/* FULL REACTIVE STRUCTS INTEGRATED DIRECTLY IN THE INLINE DOM EXPRESSIONS FOR TRANSFORMS */}
-      <canvas ref={originalCanvasRef} style={{ 
-        position: 'absolute', 
-        'transform-origin': 'center center', 
-        transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 
-        'z-index': 1, 
-        display: props.isCompare && hasImage() ? 'block' : 'none' 
-      }} />
-      
-      <canvas ref={canvasRef} style={{ 
-        position: 'absolute', 
-        'transform-origin': 'center center', 
-        transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 
-        'z-index': 2, 
-        display: hasImage() ? 'block' : 'none', 
-        'clip-path': props.isCompare ? `inset(0 0 0 ${getImageSplitPercentage()}%)` : 'none', 
-        'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' 
-      }} />
+      <canvas ref={originalCanvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, display: props.isCompare && hasImage() ? 'block' : 'none' }} />
+      <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 2, display: hasImage() ? 'block' : 'none', 'clip-path': props.isCompare ? `inset(0 0 0 ${getImageSplitPercentage()}%)` : 'none', 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
       
       {props.isCompare && hasImage() && (
         <div onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); isDraggingSplitter = true; }} onPointerMove={(e) => { if (isDraggingSplitter) { e.stopPropagation(); const rect = containerRef.getBoundingClientRect(); setSplitPos(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))); } }} onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture(e.pointerId); isDraggingSplitter = false; }} style={{ position: 'absolute', top: 0, bottom: 0, left: `${splitPos() * 100}%`, width: '40px', 'margin-left': '-20px', cursor: 'ew-resize', 'z-index': 100, display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'touch-action': 'none' }}>

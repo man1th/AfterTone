@@ -7,7 +7,7 @@ import { Histogram } from './components/Histogram';
 import { ToneCurve, CurveState } from './components/ToneCurve';
 
 declare const window: any;
-type PanelId = 'histogram' | 'wb' | 'exposure' | 'hdr' | 'clarity' | 'dehaze' | 'curve' | 'texture' | 'halation' | 'bloom';
+type PanelId = 'histogram' | 'wb' | 'exposure' | 'hdr' | 'clarity' | 'dehaze' | 'curve' | 'texture' | 'bloom' | 'halation' | 'grain';
 
 const NavBtn: Component<{ icon: string, label: string, onClick?: () => void, active?: boolean, disabled?: boolean }> = (props) => (
   <button onClick={props.onClick} disabled={props.disabled} style={{ opacity: props.disabled ? 0.35 : 1, pointerEvents: props.disabled ? 'none' : 'auto', background: props.active ? '#2a2a2a' : 'transparent', border: 'none', display: 'flex', 'flex-direction': 'column', 'align-items': 'center', 'justify-content': 'center', gap: '4px', cursor: props.disabled ? 'default' : 'pointer', padding: '6px 14px', 'border-radius': '6px', transition: 'background 0.15s ease' }}>
@@ -21,16 +21,17 @@ const App: Component = () => {
     exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, 
     hal_thresh: 85, hal_radius: 20, hal_intensity: 0, hal_color: '#ff3300', show_hal_map: false,
     bloom_intensity: 0,
+    grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0,
     enabled: true 
   });
   const [isWasmReady, setIsWasmReady] = createSignal(false); const [isCompare, setIsCompare] = createSignal(false); const [isOriginal, setIsOriginal] = createSignal(false);
   const [hasImage, setHasImage] = createSignal(false); 
   const [histogramData, setHistogramData] = createSignal<number[]>(new Array(1024).fill(0)); const [hoverLuminance, setHoverLuminance] = createSignal<number | null>(null); const [metadata, setMetadata] = createSignal({ iso: '---', shutter: '---', fstop: '---' });
   
-  const [panelOrder, setPanelOrder] = createSignal<PanelId[]>(['histogram', 'wb', 'exposure', 'hdr', 'clarity', 'dehaze', 'curve', 'texture', 'bloom', 'halation']);
+  const [panelOrder, setPanelOrder] = createSignal<PanelId[]>(['histogram', 'wb', 'exposure', 'hdr', 'clarity', 'dehaze', 'curve', 'texture', 'bloom', 'halation', 'grain']);
   const [draggedIndex, setDraggedIndex] = createSignal<number | null>(null);
-  const [expanded, setExpanded] = createStore<Record<PanelId, boolean>>({ histogram: true, wb: true, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false });
-  const [bypassed, setBypassed] = createStore<Record<string, boolean>>({ wb: false, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false });
+  const [expanded, setExpanded] = createStore<Record<PanelId, boolean>>({ histogram: true, wb: true, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false });
+  const [bypassed, setBypassed] = createStore<Record<string, boolean>>({ wb: false, exposure: false, hdr: false, clarity: false, dehaze: false, curve: false, texture: false, halation: false, bloom: false, grain: false });
   const [activeSliderName, setActiveSliderName] = createSignal<string | null>(null);
 
   const defaultCurves = (): CurveState => ({ master: [{x:0,y:0}, {x:1,y:1}], red: [{x:0,y:0}, {x:1,y:1}], green: [{x:0,y:0}, {x:1,y:1}], blue: [{x:0,y:0}, {x:1,y:1}] });
@@ -43,6 +44,7 @@ const App: Component = () => {
     exposure: bypassed.exposure ? 0 : lightState.exposure, contrast: bypassed.exposure ? 0 : lightState.contrast, highlights: bypassed.hdr ? 0 : lightState.highlights, shadows: bypassed.hdr ? 0 : lightState.shadows, whites: bypassed.hdr ? 0 : lightState.whites, blacks: bypassed.hdr ? 0 : lightState.blacks, texture: bypassed.texture ? 0 : lightState.texture, clarity: bypassed.clarity ? 0 : lightState.clarity, dehaze: bypassed.dehaze ? 0 : lightState.dehaze, temp: bypassed.wb ? 0 : lightState.temp, tint: bypassed.wb ? 0 : lightState.tint, vibrance: bypassed.exposure ? 0 : lightState.vibrance, saturation: bypassed.exposure ? 0 : lightState.saturation, 
     hal_thresh: bypassed.halation ? 80 : lightState.hal_thresh, hal_radius: bypassed.halation ? 0 : lightState.hal_radius, hal_intensity: bypassed.halation ? 0 : lightState.hal_intensity, hal_color: lightState.hal_color, show_hal_map: lightState.show_hal_map,
     bloom_intensity: bypassed.bloom ? 0 : lightState.bloom_intensity,
+    grain_amount: bypassed.grain ? 0 : lightState.grain_amount, grain_size: lightState.grain_size, grain_roughness: lightState.grain_roughness, grain_color_variance: lightState.grain_color_variance,
     enabled: lightState.enabled
   });
 
@@ -56,12 +58,13 @@ const App: Component = () => {
     return null; 
   };
   
-  const resetAllToOriginal = () => { setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, hal_thresh: 85, hal_radius: 20, hal_intensity: 0, bloom_intensity: 0 }); setCurves(defaultCurves()); };
+  const resetAllToOriginal = () => { setLightState({ exposure: 0, contrast: 0, highlights: 0, shadows: 0, whites: 0, blacks: 0, texture: 0, clarity: 0, dehaze: 0, temp: 0, tint: 0, vibrance: 0, saturation: 0, hal_thresh: 85, hal_radius: 20, hal_intensity: 0, bloom_intensity: 0, grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0 }); setCurves(defaultCurves()); };
 
   const panelMeta: Record<PanelId, { title: string, features: boolean, reset: () => void }> = {
     histogram: { title: 'Histogram', features: false, reset: () => {} }, wb: { title: 'White Balance', features: true, reset: () => setLightState({ temp: 0, tint: 0 }) }, exposure: { title: 'Exposure', features: true, reset: () => setLightState({ exposure: 0, contrast: 0, saturation: 0, vibrance: 0 }) }, hdr: { title: 'High Dynamic Range', features: true, reset: () => setLightState({ highlights: 0, shadows: 0, whites: 0, blacks: 0 }) }, clarity: { title: 'Clarity', features: true, reset: () => setLightState({ clarity: 0 }) }, dehaze: { title: 'Dehaze', features: true, reset: () => setLightState({ dehaze: 0 }) }, curve: { title: 'Tone Curve', features: true, reset: () => setCurves(defaultCurves()) }, texture: { title: 'Texture', features: true, reset: () => setLightState({ texture: 0 }) },
     halation: { title: 'Halation', features: true, reset: () => setLightState({ hal_thresh: 85, hal_radius: 20, hal_intensity: 0 }) },
-    bloom: { title: 'Bloom', features: true, reset: () => setLightState({ bloom_intensity: 0 }) }
+    bloom: { title: 'Bloom', features: true, reset: () => setLightState({ bloom_intensity: 0 }) },
+    grain: { title: 'Film Grain', features: true, reset: () => setLightState({ grain_amount: 0, grain_size: 35, grain_roughness: 25, grain_color_variance: 0 }) }
   };
 
   const renderContent = (id: PanelId) => {
@@ -112,6 +115,14 @@ const App: Component = () => {
             <span style={{ 'font-size': '10px', color: '#b0b0b0', 'text-transform': 'capitalize' }}>Halation Color</span>
             <input type="color" value={lightState.hal_color} disabled={bypassed.halation} onInput={(e) => setLightState('hal_color', e.currentTarget.value)} style={{ background: 'none', border: '1px solid #444', 'border-radius': '4px', cursor: 'pointer', height: '22px', width: '32px', padding: 0 }} />
           </div>
+        </div>
+      );
+      case 'grain': return (
+        <div style={{ padding: '16px 14px', display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+          <Slider label="Amount" value={lightState.grain_amount} min={0} max={100} disabled={bypassed.grain} onChange={(v) => setLightState('grain_amount', v)} />
+          <Slider label="Size" value={lightState.grain_size} min={0} max={100} disabled={bypassed.grain} onChange={(v) => setLightState('grain_size', v)} />
+          <Slider label="Roughness" value={lightState.grain_roughness} min={0} max={100} disabled={bypassed.grain} onChange={(v) => setLightState('grain_roughness', v)} />
+          <Slider label="Color Variance" value={lightState.grain_color_variance} min={0} max={100} disabled={bypassed.grain} onChange={(v) => setLightState('grain_color_variance', v)} />
         </div>
       );
     }

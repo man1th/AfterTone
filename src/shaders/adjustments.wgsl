@@ -3,7 +3,8 @@ struct LightParams {
     texture_adj: f32, clarity: f32, dehaze: f32, temp: f32, tint: f32, vibrance: f32, saturation: f32,
     hal_thresh: f32, hal_radius: f32, hal_r: f32, hal_g: f32, hal_b: f32, hal_intensity: f32,
     bloom_intensity: f32, show_hal_map: f32, is_interacting: f32,
-    pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32, pad9: f32, pad10: f32
+    grain_amount: f32, grain_size: f32, grain_roughness: f32, grain_color_variance: f32,
+    pad0: f32, pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
@@ -25,6 +26,25 @@ fn getLuma(rgb: vec3<f32>) -> f32 { return dot(rgb, vec3<f32>(0.299, 0.587, 0.11
 fn ign(v: vec2<f32>) -> f32 {
     var magic = vec3<f32>(0.06711056, 0.00583715, 52.9829189);
     return fract(magic.z * fract(dot(v, magic.xy)));
+}
+
+// High Quality Sine-Free Hash Engine (Zero geometric banding)
+fn hash32(p: vec2<f32>) -> vec3<f32> {
+    var p3 = fract(vec3<f32>(p.xyx) * vec3<f32>(0.1031, 0.1030, 0.0973));
+    p3 = p3 + dot(p3, p3.yxz + 33.33);
+    return fract((p3.xxy + p3.yzz) * p3.zyx);
+}
+
+// Organic Value Noise for Emulsion Clumps
+fn value_noise3(uv: vec2<f32>) -> vec3<f32> {
+    let i = floor(uv);
+    let f = fract(uv);
+    let u = f * f * (3.0 - 2.0 * f);
+    return mix(
+        mix(hash32(i), hash32(i + vec2<f32>(1.0, 0.0)), u.x),
+        mix(hash32(i + vec2<f32>(0.0, 1.0)), hash32(i + vec2<f32>(1.0, 1.0)), u.x),
+        u.y
+    );
 }
 
 @fragment
@@ -92,11 +112,10 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let noise = ign(in.position.xy);
     let random_rotation = noise * 6.2831853; 
 
-    // PHOTOSHOP HALATION WORKFLOW
+    // STOCHASTIC HALATION
     if (params.hal_intensity > 0.0 && params.hal_radius > 0.0) {
         var blur_accum = vec3<f32>(0.0);
         var weight_sum = 0.0;
-        
         let H_TAPS = 32.0; 
         let h_stride = select(1.0, 3.0, params.is_interacting > 0.5);
         let thresh = params.hal_thresh / 100.0;
@@ -107,17 +126,13 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             let r_frac = sqrt(i + noise) / sqrt(H_TAPS);
             let theta = i * GOLDEN_ANGLE + random_rotation;
             let pt = vec2<f32>(cos(theta) * aspect_ratio, sin(theta)) * r_frac;
-            
             let sample_uv = in.uv + pt * (params.hal_radius / dims.x);
             let s_rgb = textureSample(myTexture, mySampler, sample_uv).rgb * exp_mult;
-
             let s_luma = getLuma(s_rgb);
             let mask = smoothstep(thresh - 0.05, thresh + 0.05, s_luma);
             let thresh_color = s_rgb * mask;
-
             let dist_px = r_frac * params.hal_radius;
             let weight = exp(-(dist_px * dist_px) / two_sigma_sq);
-
             blur_accum += thresh_color * weight;
             weight_sum += weight;
         }
@@ -125,26 +140,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         let blurred_layer = blur_accum / weight_sum;
         let hal_color = vec3<f32>(params.hal_r, params.hal_g, params.hal_b);
         var overlay_res = vec3<f32>(0.0);
-        
         for (var c = 0; c < 3; c++) {
-            if (blurred_layer[c] < 0.5) {
-                overlay_res[c] = 2.0 * blurred_layer[c] * hal_color[c];
-            } else {
-                overlay_res[c] = 1.0 - 2.0 * (1.0 - blurred_layer[c]) * (1.0 - hal_color[c]);
-            }
+            if (blurred_layer[c] < 0.5) { overlay_res[c] = 2.0 * blurred_layer[c] * hal_color[c]; } 
+            else { overlay_res[c] = 1.0 - 2.0 * (1.0 - blurred_layer[c]) * (1.0 - hal_color[c]); }
         }
-        
         let final_halation = overlay_res * (params.hal_intensity / 100.0);
         rgb = 1.0 - (1.0 - rgb) * (1.0 - final_halation);
     }
 
-    // BLOOM WORKFLOW
+    // STOCHASTIC BLOOM
     if (params.bloom_intensity > 0.0) {
         var bloom_accum = vec3<f32>(0.0);
         var b_weight_sum = 0.0;
         let B_TAPS = 24.0;
         let b_stride = select(1.0, 3.0, params.is_interacting > 0.5);
-        
         for (var i = 0.0; i < B_TAPS; i += b_stride) {
             let r_frac = sqrt(i + noise) / sqrt(B_TAPS);
             let theta = i * GOLDEN_ANGLE + random_rotation;
@@ -155,10 +164,52 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
             bloom_accum += s_rgb * b_weight;
             b_weight_sum += b_weight;
         }
-        
         let bloom_layer = bloom_accum / b_weight_sum;
         let final_bloom = bloom_layer * (params.bloom_intensity / 100.0);
         rgb = 1.0 - (1.0 - rgb) * (1.0 - final_bloom);
+    }
+    
+    // --- DEHANCER-GRADE FILM GRAIN ENGINE ---
+    if (params.grain_amount > 0.0) {
+        let base_scale = 1600.0 / max(params.grain_size, 0.1);
+        
+        // Emulsion layer dispersion physics: Blue halide crystals are physically larger
+        let uv_r = in.uv * base_scale * 1.05; 
+        let uv_g = in.uv * base_scale * 1.00; 
+        let uv_b = in.uv * base_scale * 0.85; 
+        
+        // Generate pure, sine-free micro-crystals
+        let fine_noise = vec3<f32>(hash32(uv_r).r, hash32(uv_g).g, hash32(uv_b).b);
+        
+        // Generate organic clump clouds
+        let clump_noise = vec3<f32>(value_noise3(uv_r * 0.5).r, value_noise3(uv_g * 0.5).g, value_noise3(uv_b * 0.5).b);
+        
+        // Interpolate structure based on roughness parameter
+        var grain_vec = mix(fine_noise, clump_noise, params.grain_roughness);
+        grain_vec = grain_vec * 2.0 - vec3<f32>(1.0);
+        
+        // Chroma variance decoupling
+        let mono_val = 0.299 * grain_vec.r + 0.587 * grain_vec.g + 0.114 * grain_vec.b;
+        let final_grain = mix(vec3<f32>(mono_val), grain_vec, params.grain_color_variance);
+        
+        // Film Exposure Density Mask
+        // Authentic analog grain peaks in the midtones/shadows and tapers in extreme blown highlights
+        let film_luma = 0.299 * rgb.r + 0.587 * rgb.g + 0.114 * rgb.b;
+        let mask = 1.0 - pow(film_luma, 3.0); 
+        let density = mix(0.15, 1.0, mask);
+        
+        // Massively increased mathematical headroom for Dehancer-level intense pushing
+        let intensity = params.grain_amount * 3.5;
+        
+        // Dye Cloud Soft-Light Modulation (Altering local pixel contrast)
+        let blend = final_grain * intensity * density + vec3<f32>(0.5);
+        let l_step = step(vec3<f32>(0.5), blend);
+        
+        let dark = rgb - (1.0 - 2.0 * blend) * rgb * (1.0 - rgb);
+        let d = select(sqrt(rgb), ((16.0 * rgb - 12.0) * rgb + 4.0) * rgb, rgb <= vec3<f32>(0.25));
+        let light = rgb + (2.0 * blend - 1.0) * (d - rgb);
+        
+        rgb = mix(dark, light, l_step);
     }
 
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
@@ -170,8 +221,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let v = params.vibrance / 100.0; var vib_scale: f32; if (v >= 0.0) { vib_scale = 1.0 + (v * (1.0 - current_saturation)); } else { vib_scale = 1.0 + (v * current_saturation); }
     rgb = mix(vec3<f32>(getLuma(rgb)), rgb, max(0.0, (1.0 + (params.saturation / 100.0)) * vib_scale));
     rgb = clamp(rgb, vec3<f32>(0.0), vec3<f32>(1.0));
-
-    // NOTE: Spatial compare logic is entirely stripped out of the shader for performance!
 
     return vec4<f32>(rgb, color.a);
 }
