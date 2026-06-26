@@ -66,8 +66,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
     curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST }); curveTextureView = curveTexture.createView();
     const module = device.createShaderModule({ code: shaderCode }); pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs_main' }, fragment: { module, entryPoint: 'fs_main', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     
-    // INCREASED TO 256 BYTES (64 FLOATS) FOR COLOR MIXER ARRAY
-    uniformBuffer = device.createBuffer({ size: 256, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
+    // INCREASED TO 288 BYTES (72 FLOATS) TO ACCOMMODATE VIGNETTE STRUCTS
+    uniformBuffer = device.createBuffer({ size: 288, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }] });
     exportBindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: fullResTexture.createView() }, { binding: 3, resource: curveTextureView }] });
     const histModule = device.createShaderModule({ code: histShaderCode }); computePipeline = device.createComputePipeline({ layout: 'auto', compute: { module: histModule, entryPoint: 'main' } });
@@ -103,7 +103,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const p = props.lightState; const active = p.enabled;
     const [hr, hg, hb] = hexToRgb(p.hal_color || '#ff3300');
 
-    // 64-FLOAT EXACT ARRAY MAPPING (INCLUDES ALL COLOR MIXER PARAMS)
+    // 72-FLOAT EXACT ALIGNMENT MAPPING
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
       active ? p.hal_thresh : 80, active ? p.hal_radius : 10, hr, hg, hb, active ? p.hal_intensity : 0,
@@ -121,7 +121,8 @@ export const Viewport: Component<ViewportProps> = (props) => {
       active ? p.cm_h_b : 0, active ? p.cm_s_b : 0, active ? p.cm_l_b : 0,
       active ? p.cm_h_p : 0, active ? p.cm_s_p : 0, active ? p.cm_l_p : 0,
       active ? p.cm_h_m : 0, active ? p.cm_s_m : 0, active ? p.cm_l_m : 0,
-      0, 0 // 2 padding floats
+      active ? p.vig_amount : 0, active ? p.vig_midpoint : 50, active ? p.vig_roundness : 0, active ? p.vig_feather : 50,
+      0, 0, 0, 0, 0, 0 // 6 PADDING FLOATS
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
     
@@ -179,7 +180,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
   props.getImportFn(() => fileInputRef.click());
 
   createEffect(() => { 
-      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.lightState.cg_s_h, props.lightState.cg_s_s, props.lightState.cg_s_l, props.lightState.cg_m_h, props.lightState.cg_m_s, props.lightState.cg_m_l, props.lightState.cg_h_h, props.lightState.cg_h_s, props.lightState.cg_h_l, props.lightState.cg_g_h, props.lightState.cg_g_s, props.lightState.cg_g_l, props.lightState.cm_h_r, props.lightState.cm_s_r, props.lightState.cm_l_r, props.lightState.cm_h_o, props.lightState.cm_s_o, props.lightState.cm_l_o, props.lightState.cm_h_y, props.lightState.cm_s_y, props.lightState.cm_l_y, props.lightState.cm_h_g, props.lightState.cm_s_g, props.lightState.cm_l_g, props.lightState.cm_h_a, props.lightState.cm_s_a, props.lightState.cm_l_a, props.lightState.cm_h_b, props.lightState.cm_s_b, props.lightState.cm_l_b, props.lightState.cm_h_p, props.lightState.cm_s_p, props.lightState.cm_l_p, props.lightState.cm_h_m, props.lightState.cm_s_m, props.lightState.cm_l_m, props.curves]; 
+      const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.lightState.cg_s_h, props.lightState.cg_s_s, props.lightState.cg_s_l, props.lightState.cg_m_h, props.lightState.cg_m_s, props.lightState.cg_m_l, props.lightState.cg_h_h, props.lightState.cg_h_s, props.lightState.cg_h_l, props.lightState.cg_g_h, props.lightState.cg_g_s, props.lightState.cg_g_l, props.lightState.cm_h_r, props.lightState.cm_s_r, props.lightState.cm_l_r, props.lightState.cm_h_o, props.lightState.cm_s_o, props.lightState.cm_l_o, props.lightState.cm_h_y, props.lightState.cm_s_y, props.lightState.cm_l_y, props.lightState.cm_h_g, props.lightState.cm_s_g, props.lightState.cm_l_g, props.lightState.cm_h_a, props.lightState.cm_s_a, props.lightState.cm_l_a, props.lightState.cm_h_b, props.lightState.cm_s_b, props.lightState.cm_l_b, props.lightState.cm_h_p, props.lightState.cm_s_p, props.lightState.cm_l_p, props.lightState.cm_h_m, props.lightState.cm_s_m, props.lightState.cm_l_m, props.lightState.vig_amount, props.lightState.vig_midpoint, props.lightState.vig_roundness, props.lightState.vig_feather, props.curves]; 
       renderFrame(false); 
   });
   

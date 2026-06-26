@@ -8,8 +8,6 @@ struct LightParams {
     cg_m_h: f32, cg_m_s: f32, cg_m_l: f32,
     cg_h_h: f32, cg_h_s: f32, cg_h_l: f32,
     cg_g_h: f32, cg_g_s: f32, cg_g_l: f32,
-    
-    // --- COLOR MIXER (HSL) ---
     cm_h_r: f32, cm_s_r: f32, cm_l_r: f32,
     cm_h_o: f32, cm_s_o: f32, cm_l_o: f32,
     cm_h_y: f32, cm_s_y: f32, cm_l_y: f32,
@@ -19,7 +17,10 @@ struct LightParams {
     cm_h_p: f32, cm_s_p: f32, cm_l_p: f32,
     cm_h_m: f32, cm_s_m: f32, cm_l_m: f32,
     
-    pad0: f32, pad1: f32
+    // --- VIGNETTE ENGINE ---
+    vig_amount: f32, vig_midpoint: f32, vig_roundness: f32, vig_feather: f32,
+    
+    pad0: f32, pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
@@ -123,9 +124,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         }
     }
 
-    // =========================================================================
-    // COLOR MIXER (HSL Engine)
-    // =========================================================================
     var cm_h = array<f32, 8>(params.cm_h_r, params.cm_h_o, params.cm_h_y, params.cm_h_g, params.cm_h_a, params.cm_h_b, params.cm_h_p, params.cm_h_m);
     var cm_s = array<f32, 8>(params.cm_s_r, params.cm_s_o, params.cm_s_y, params.cm_s_g, params.cm_s_a, params.cm_s_b, params.cm_s_p, params.cm_s_m);
     var cm_l = array<f32, 8>(params.cm_l_r, params.cm_l_o, params.cm_l_y, params.cm_l_g, params.cm_l_a, params.cm_l_b, params.cm_l_p, params.cm_l_m);
@@ -134,29 +132,20 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let widths = array<f32, 8>(0.0833, 0.0833, 0.1666, 0.1666, 0.1666, 0.125, 0.125, 0.0833);
 
     var hsv = rgb2hsv(rgb);
-    var h_shift = 0.0;
-    var s_mul = 1.0;
-    var v_mul = 1.0;
+    var h_shift = 0.0; var s_mul = 1.0; var v_mul = 1.0;
 
     for (var i = 0u; i < 8u; i = i + 1u) {
         var dist = abs(hsv.x - centers[i]);
         dist = min(dist, 1.0 - dist);
         let w = smoothstep(widths[i], 0.0, dist);
-        
         h_shift += (cm_h[i] / 360.0) * w;
         s_mul *= (1.0 + (cm_s[i] / 100.0) * w);
         v_mul *= (1.0 + (cm_l[i] / 100.0) * w);
     }
-
-    hsv.x = fract(hsv.x + h_shift);
-    if (hsv.x < 0.0) { hsv.x += 1.0; }
-    hsv.y = clamp(hsv.y * s_mul, 0.0, 1.0);
-    hsv.z = clamp(hsv.z * v_mul, 0.0, 1.0);
+    hsv.x = fract(hsv.x + h_shift); if (hsv.x < 0.0) { hsv.x += 1.0; }
+    hsv.y = clamp(hsv.y * s_mul, 0.0, 1.0); hsv.z = clamp(hsv.z * v_mul, 0.0, 1.0);
     rgb = hsv2rgb(hsv);
 
-    // =========================================================================
-    // COLOR GRADING ENGINE 
-    // =========================================================================
     let cg_luma = getLuma(rgb);
     let m_shadows = 1.0 - smoothstep(0.0, 0.45, cg_luma);
     let m_highlights = smoothstep(0.55, 1.0, cg_luma);
@@ -179,13 +168,47 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
     let lum_shift = (params.cg_s_l / 100.0 * m_shadows) + (params.cg_m_l / 100.0 * m_midtones) + (params.cg_h_l / 100.0 * m_highlights) + (params.cg_g_l / 100.0);
     rgb = clamp(rgb + lum_shift * 0.5, vec3<f32>(0.0), vec3<f32>(1.0));
 
-    // Spatial Effects
+    // =========================================================================
+    // LIGHTROOM-GRADE OPTICAL VIGNETTE ENGINE
+    // =========================================================================
+    if (params.vig_amount != 0.0) {
+        var coord = in.uv * 2.0 - 1.0;
+        let roundness = params.vig_roundness / 100.0; 
+        let aspect = dims.x / dims.y;
+        
+        // Morph between Aspect Ratio-aware Ellipse and Perfect Circle
+        let scale_x = mix(aspect, 1.0, max(roundness, 0.0));
+        coord.x *= scale_x;
+        
+        // Superellipse Power morph (2.0 = Ellipse, >2 = Rectangular Squircle)
+        let power = mix(2.0, 8.0, -min(roundness, 0.0));
+        let dist = pow(pow(abs(coord.x), power) + pow(abs(coord.y), power), 1.0 / power);
+        
+        let mid = params.vig_midpoint / 100.0;
+        let radius = mix(0.1, 1.2, mid);
+        
+        let feather = params.vig_feather / 100.0;
+        let f_width = mix(0.01, 1.2, feather);
+        
+        let inner_edge = max(0.0, radius - f_width);
+        let outer_edge = radius + f_width;
+        let mask = smoothstep(inner_edge, outer_edge, dist);
+        
+        let amount = params.vig_amount / 100.0;
+        if (amount < 0.0) {
+            // Negative Vignette (Darkening Exposure Burn)
+            rgb *= mix(1.0, 1.0 + amount, mask);
+        } else {
+            // Positive Vignette (White Bloom Screen)
+            rgb = mix(rgb, vec3<f32>(1.0) - (vec3<f32>(1.0) - rgb) * (1.0 - amount), mask);
+        }
+    }
+
     let aspect_ratio = dims.y / dims.x;
     let GOLDEN_ANGLE = 2.3999632;
     let noise = ign(in.position.xy);
     let random_rotation = noise * 6.2831853; 
 
-    // STOCHASTIC HALATION
     if (params.hal_intensity > 0.0 && params.hal_radius > 0.0) {
         var blur_accum = vec3<f32>(0.0); var weight_sum = 0.0;
         let H_TAPS = 32.0; let h_stride = select(1.0, 3.0, params.is_interacting > 0.5);
@@ -217,7 +240,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         rgb = 1.0 - (1.0 - rgb) * (1.0 - final_halation);
     }
 
-    // STOCHASTIC BLOOM
     if (params.bloom_intensity > 0.0) {
         var bloom_accum = vec3<f32>(0.0); var b_weight_sum = 0.0;
         let B_TAPS = 24.0; let b_stride = select(1.0, 3.0, params.is_interacting > 0.5);
@@ -236,7 +258,6 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
         rgb = 1.0 - (1.0 - rgb) * (1.0 - final_bloom);
     }
     
-    // DEHANCER-GRADE FILM GRAIN
     if (params.grain_amount > 0.0) {
         let base_scale = 1600.0 / max(params.grain_size, 0.1);
         let uv_r = in.uv * base_scale * 1.05; let uv_g = in.uv * base_scale * 1.00; let uv_b = in.uv * base_scale * 0.85; 
