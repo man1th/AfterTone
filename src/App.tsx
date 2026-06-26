@@ -16,6 +16,7 @@ const NavBtn: Component<{ icon: string, label: string, onClick?: () => void, act
   </button>
 );
 
+// --- LIGHTROOM COLOR WHEEL UI COMPONENT (From previous version) ---
 const ColorWheelControl: Component<{ h: number, s: number, disabled: boolean, onChange: (h: number, s: number) => void }> = (props) => {
   let wheelRef!: HTMLDivElement;
   let dragMode: 'inner' | 'outer' | null = null;
@@ -63,7 +64,7 @@ const ColorGradingPanel: Component<{ state: any, bypassed: boolean, update: (fie
   );
 };
 
-// --- COLOR MIXER ENGINE UI ---
+// --- COLOR MIXER UI COMPONENTS ---
 const MIXER_COLORS = [
   { id: 'r', label: 'Red', hex: '#ef4444', hGrad: 'linear-gradient(to right, #ec4899, #ef4444, #f97316)' },
   { id: 'o', label: 'Orange', hex: '#f97316', hGrad: 'linear-gradient(to right, #ef4444, #f97316, #eab308)' },
@@ -75,48 +76,56 @@ const MIXER_COLORS = [
   { id: 'm', label: 'Magenta', hex: '#ec4899', hGrad: 'linear-gradient(to right, #a855f7, #ec4899, #ef4444)' }
 ];
 
+// Unified standard inline slider layout specifically injected with color track arrays
 const GradientSlider: Component<{ label: string, value: number, disabled: boolean, onChange: (v: number) => void, bg: string }> = (props) => (
-  <div style={{ opacity: props.disabled ? 0.4 : 1, 'pointer-events': props.disabled ? 'none' : 'auto', 'margin-bottom': '12px' }}>
-    <div style={{ display: 'flex', 'justify-content': 'space-between', 'font-size': '11px', color: '#aaa', 'margin-bottom': '6px' }}>
-      <span>{props.label}</span>
-      <span style={{ 'font-family': 'monospace', color: '#ccc' }}>{props.value > 0 ? `+${props.value}` : props.value}</span>
-    </div>
-    <input type="range" min="-100" max="100" value={props.value} onInput={(e) => props.onChange(Math.round(parseFloat(e.currentTarget.value)))} class="color-mixer-slider" style={{ background: props.bg }} />
+  <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', opacity: props.disabled ? 0.4 : 1, 'pointer-events': props.disabled ? 'none' : 'auto', padding: '3px 0' }}>
+    <span style={{ width: '45px', 'font-size': '10px', color: '#aaa', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis', 'text-transform': 'capitalize' }}>{props.label}</span>
+    <input type="range" min="-100" max="100" value={props.value} onInput={(e) => props.onChange(Math.round(parseFloat(e.currentTarget.value)))} class="color-mixer-slider" style={{ flex: 1, background: props.bg }} />
+    <input type="number" value={props.value} onInput={(e) => { let v = parseInt(e.currentTarget.value); if(isNaN(v)) v=0; props.onChange(Math.max(-100, Math.min(100, v))); }} style={{ width: '38px', background: '#1c1c1c', border: '1px solid #333', color: '#eee', 'font-size': '10px', 'font-family': 'monospace', 'text-align': 'right', padding: '2px 4px', 'border-radius': '4px', outline: 'none' }} />
+  </div>
+);
+
+// Native monochromatic layout matching existing minimal UX
+const RadioBtn: Component<{ active: boolean, label: string, onClick: () => void }> = (props) => (
+  <div onClick={props.onClick} style={{ display: 'flex', 'align-items': 'center', gap: '6px', cursor: 'pointer' }}>
+    <div style={{ width: '12px', height: '12px', 'border-radius': '50%', border: props.active ? '4px solid #aaa' : '1px solid #555', transition: 'all 0.15s', boxSizing: 'border-box' }}></div>
+    <span style={{ 'font-size': '10px', color: props.active ? '#ddd' : '#888', 'font-weight': props.active ? '600' : '400' }}>{props.label}</span>
   </div>
 );
 
 const ColorMixerPanel: Component<{ state: any, bypassed: boolean, update: (field: string, val: number) => void }> = (props) => {
   const [mode, setMode] = createSignal<'hsl'|'color'>('hsl');
   const [activeColor, setActiveColor] = createSignal<string>('r');
-  const [activeHslTab, setActiveHslTab] = createSignal<'h'|'s'|'l'>('h');
 
   return (
     <div style={{ padding: '12px 14px' }}>
       <style>{`
-        .color-mixer-slider { -webkit-appearance: none; appearance: none; width: 100%; height: 10px; border-radius: 5px; outline: none; }
-        .color-mixer-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.6); cursor: pointer; border: 1px solid #ddd; }
-        .color-mixer-slider::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,0.6); cursor: pointer; border: 1px solid #ddd; }
+        .color-mixer-slider { -webkit-appearance: none; appearance: none; height: 4px; border-radius: 2px; outline: none; margin: 0; }
+        .color-mixer-slider::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 12px; height: 12px; border-radius: 50%; background: #eee; box-shadow: 0 1px 3px rgba(0,0,0,0.6); cursor: pointer; border: 1px solid #888; }
+        .color-mixer-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eee; box-shadow: 0 1px 3px rgba(0,0,0,0.6); cursor: pointer; border: 1px solid #888; }
+        .color-mixer-square { width: 22px; height: 22px; border-radius: 4px; cursor: pointer; transition: all 0.1s; flex-shrink: 0; }
+        .color-mixer-square.active { box-shadow: 0 0 0 2px #1e1e1e, 0 0 0 4px #aaa; transform: scale(1.05); }
       `}</style>
       
       <div style={{ display: 'flex', 'align-items': 'center', gap: '16px', 'margin-bottom': '16px' }}>
         <span style={{ 'font-size': '11px', color: '#888' }}>Adjust:</span>
-        <label style={{ display: 'flex', 'align-items': 'center', gap: '6px', cursor: 'pointer', 'font-size': '11px', color: '#ccc' }}>
-          <input type="radio" checked={mode() === 'hsl'} onChange={() => setMode('hsl')} style={{ cursor: 'pointer' }} /> HSL
-        </label>
-        <label style={{ display: 'flex', 'align-items': 'center', gap: '6px', cursor: 'pointer', 'font-size': '11px', color: '#ccc' }}>
-          <input type="radio" checked={mode() === 'color'} onChange={() => setMode('color')} style={{ cursor: 'pointer' }} /> Colour
-        </label>
+        <RadioBtn active={mode() === 'hsl'} label="HSL" onClick={() => setMode('hsl')} />
+        <RadioBtn active={mode() === 'color'} label="Colour" onClick={() => setMode('color')} />
       </div>
 
       {mode() === 'color' && (
         <>
-          <div style={{ display: 'flex', 'justify-content': 'space-between', 'margin-bottom': '20px' }}>
+          <div style={{ display: 'flex', 'justify-content': 'space-between', 'margin-bottom': '16px', padding: '4px 0' }}>
             {MIXER_COLORS.map(c => (
-              <button onClick={() => setActiveColor(c.id)} style={{ width: '20px', height: '20px', 'border-radius': '50%', background: c.hex, border: activeColor() === c.id ? '2px solid #fff' : '2px solid transparent', cursor: 'pointer', transition: 'all 0.1s', 'box-shadow': activeColor() === c.id ? '0 0 6px rgba(255,255,255,0.4)' : 'none', opacity: props.bypassed ? 0.4 : 1 }} />
+              <div 
+                onClick={() => setActiveColor(c.id)} 
+                class={`color-mixer-square ${activeColor() === c.id ? 'active' : ''}`}
+                style={{ background: c.hex, opacity: props.bypassed ? 0.4 : 1 }} 
+              />
             ))}
           </div>
           {MIXER_COLORS.map(c => activeColor() === c.id && (
-            <div>
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
               <GradientSlider label="Hue" value={props.state[`cm_h_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_h_${c.id}`, v)} bg={c.hGrad} />
               <GradientSlider label="Saturation" value={props.state[`cm_s_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_s_${c.id}`, v)} bg={`linear-gradient(to right, #808080, ${c.hex})`} />
               <GradientSlider label="Luminance" value={props.state[`cm_l_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_l_${c.id}`, v)} bg={`linear-gradient(to right, #000, ${c.hex}, #fff)`} />
@@ -126,24 +135,28 @@ const ColorMixerPanel: Component<{ state: any, bypassed: boolean, update: (field
       )}
 
       {mode() === 'hsl' && (
-        <>
-          <div style={{ display: 'flex', 'border-bottom': '1px solid #333', 'margin-bottom': '16px' }}>
-            {[ { id: 'h', label: 'Hue' }, { id: 's', label: 'Saturation' }, { id: 'l', label: 'Luminance' } ].map(t => (
-              <button onClick={() => setActiveHslTab(t.id as any)} style={{ flex: 1, background: 'none', border: 'none', 'border-bottom': activeHslTab() === t.id ? '2px solid #aaa' : '2px solid transparent', color: activeHslTab() === t.id ? '#ddd' : '#666', 'font-size': '10px', 'font-weight': '400', padding: '6px 0', cursor: 'pointer', transition: 'all 0.15s' }}>{t.label}</button>
-            ))}
+        <div style={{ display: 'flex', 'flex-direction': 'column', gap: '16px' }}>
+          <div>
+            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Hue</div>
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_h_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_h_${c.id}`, v)} bg={c.hGrad} />)}
+            </div>
           </div>
-          <div style={{ display: 'flex', 'flex-direction': 'column', gap: '4px' }}>
-            {MIXER_COLORS.map(c => (
-              <GradientSlider 
-                label={c.label} 
-                value={props.state[`cm_${activeHslTab()}_${c.id}`]} 
-                disabled={props.bypassed} 
-                onChange={(v) => props.update(`cm_${activeHslTab()}_${c.id}`, v)} 
-                bg={ activeHslTab() === 'h' ? c.hGrad : activeHslTab() === 's' ? `linear-gradient(to right, #808080, ${c.hex})` : `linear-gradient(to right, #000, ${c.hex}, #fff)` } 
-              />
-            ))}
+          <div style={{ height: '1px', background: '#333' }}></div>
+          <div>
+            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Saturation</div>
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_s_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_s_${c.id}`, v)} bg={`linear-gradient(to right, #808080, ${c.hex})`} />)}
+            </div>
           </div>
-        </>
+          <div style={{ height: '1px', background: '#333' }}></div>
+          <div>
+            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Luminance</div>
+            <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
+              {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_l_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_l_${c.id}`, v)} bg={`linear-gradient(to right, #000, ${c.hex}, #fff)`} />)}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
