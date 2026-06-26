@@ -16,7 +16,6 @@ const NavBtn: Component<{ icon: string, label: string, onClick?: () => void, act
   </button>
 );
 
-// --- LIGHTROOM COLOR WHEEL UI COMPONENT (From previous version) ---
 const ColorWheelControl: Component<{ h: number, s: number, disabled: boolean, onChange: (h: number, s: number) => void }> = (props) => {
   let wheelRef!: HTMLDivElement;
   let dragMode: 'inner' | 'outer' | null = null;
@@ -76,16 +75,14 @@ const MIXER_COLORS = [
   { id: 'm', label: 'Magenta', hex: '#ec4899', hGrad: 'linear-gradient(to right, #a855f7, #ec4899, #ef4444)' }
 ];
 
-// Unified standard inline slider layout specifically injected with color track arrays
 const GradientSlider: Component<{ label: string, value: number, disabled: boolean, onChange: (v: number) => void, bg: string }> = (props) => (
   <div style={{ display: 'flex', 'align-items': 'center', gap: '8px', opacity: props.disabled ? 0.4 : 1, 'pointer-events': props.disabled ? 'none' : 'auto', padding: '3px 0' }}>
     <span style={{ width: '45px', 'font-size': '10px', color: '#aaa', 'white-space': 'nowrap', overflow: 'hidden', 'text-overflow': 'ellipsis', 'text-transform': 'capitalize' }}>{props.label}</span>
     <input type="range" min="-100" max="100" value={props.value} onInput={(e) => props.onChange(Math.round(parseFloat(e.currentTarget.value)))} class="color-mixer-slider" style={{ flex: 1, background: props.bg }} />
-    <input type="number" value={props.value} onInput={(e) => { let v = parseInt(e.currentTarget.value); if(isNaN(v)) v=0; props.onChange(Math.max(-100, Math.min(100, v))); }} style={{ width: '38px', background: '#1c1c1c', border: '1px solid #333', color: '#eee', 'font-size': '10px', 'font-family': 'monospace', 'text-align': 'right', padding: '2px 4px', 'border-radius': '4px', outline: 'none' }} />
+    <input type="number" class="hide-spinners" value={props.value} onInput={(e) => { let v = parseInt(e.currentTarget.value); if(isNaN(v)) v=0; props.onChange(Math.max(-100, Math.min(100, v))); }} style={{ width: '38px', background: '#1c1c1c', border: '1px solid #333', color: '#eee', 'font-size': '10px', 'font-family': 'monospace', 'text-align': 'right', padding: '2px 4px', 'border-radius': '4px', outline: 'none' }} />
   </div>
 );
 
-// Native monochromatic layout matching existing minimal UX
 const RadioBtn: Component<{ active: boolean, label: string, onClick: () => void }> = (props) => (
   <div onClick={props.onClick} style={{ display: 'flex', 'align-items': 'center', gap: '6px', cursor: 'pointer' }}>
     <div style={{ width: '12px', height: '12px', 'border-radius': '50%', border: props.active ? '4px solid #aaa' : '1px solid #555', transition: 'all 0.15s', boxSizing: 'border-box' }}></div>
@@ -105,6 +102,8 @@ const ColorMixerPanel: Component<{ state: any, bypassed: boolean, update: (field
         .color-mixer-slider::-moz-range-thumb { width: 12px; height: 12px; border-radius: 50%; background: #eee; box-shadow: 0 1px 3px rgba(0,0,0,0.6); cursor: pointer; border: 1px solid #888; }
         .color-mixer-square { width: 22px; height: 22px; border-radius: 4px; cursor: pointer; transition: all 0.1s; flex-shrink: 0; }
         .color-mixer-square.active { box-shadow: 0 0 0 2px #1e1e1e, 0 0 0 4px #aaa; transform: scale(1.05); }
+        .hide-spinners::-webkit-inner-spin-button, .hide-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .hide-spinners { -moz-appearance: textfield; }
       `}</style>
       
       <div style={{ display: 'flex', 'align-items': 'center', gap: '16px', 'margin-bottom': '16px' }}>
@@ -137,21 +136,21 @@ const ColorMixerPanel: Component<{ state: any, bypassed: boolean, update: (field
       {mode() === 'hsl' && (
         <div style={{ display: 'flex', 'flex-direction': 'column', gap: '16px' }}>
           <div>
-            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Hue</div>
+            <div style={{ 'font-size': '11px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '400', 'text-transform': 'capitalize', 'letter-spacing': '0.5px' }}>Hue</div>
             <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
               {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_h_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_h_${c.id}`, v)} bg={c.hGrad} />)}
             </div>
           </div>
           <div style={{ height: '1px', background: '#333' }}></div>
           <div>
-            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Saturation</div>
+            <div style={{ 'font-size': '11px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '400', 'text-transform': 'capitalize', 'letter-spacing': '0.5px' }}>Saturation</div>
             <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
               {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_s_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_s_${c.id}`, v)} bg={`linear-gradient(to right, #808080, ${c.hex})`} />)}
             </div>
           </div>
           <div style={{ height: '1px', background: '#333' }}></div>
           <div>
-            <div style={{ 'font-size': '10px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '600', 'text-transform': 'uppercase', 'letter-spacing': '0.5px' }}>Luminance</div>
+            <div style={{ 'font-size': '11px', color: '#ccc', 'margin-bottom': '8px', 'font-weight': '400', 'text-transform': 'capitalize', 'letter-spacing': '0.5px' }}>Luminance</div>
             <div style={{ display: 'flex', 'flex-direction': 'column', gap: '2px' }}>
               {MIXER_COLORS.map(c => <GradientSlider label={c.label} value={props.state[`cm_l_${c.id}`]} disabled={props.bypassed} onChange={(v) => props.update(`cm_l_${c.id}`, v)} bg={`linear-gradient(to right, #000, ${c.hex}, #fff)`} />)}
             </div>
