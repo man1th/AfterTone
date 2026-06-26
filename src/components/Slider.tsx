@@ -7,6 +7,7 @@ interface SliderProps {
   disabled?: boolean;
   min?: number;
   max?: number;
+  trackBg?: string;
   onMouseEnter?: () => void;
   onMouseLeave?: () => void;
 }
@@ -43,6 +44,28 @@ export const Slider: Component<SliderProps> = (props) => {
         opacity: props.disabled ? 0.4 : 1,
       }}
     >
+      <style>{`
+        input[type=range].colored-track {
+          -webkit-appearance: none;
+          appearance: none;
+        }
+        input[type=range].colored-track::-webkit-slider-thumb {
+          -webkit-appearance: none;
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #ccc;
+          cursor: pointer;
+        }
+        input[type=range].colored-track::-moz-range-thumb {
+          width: 12px;
+          height: 12px;
+          border-radius: 50%;
+          background: #ccc;
+          cursor: pointer;
+          border: none;
+        }
+      `}</style>
       <div
         style={{
           width: "75px",
@@ -59,6 +82,7 @@ export const Slider: Component<SliderProps> = (props) => {
       </div>
       <input
         type="range"
+        class={props.trackBg ? "colored-track" : ""}
         min={min()}
         max={max()}
         value={props.value}
@@ -69,7 +93,9 @@ export const Slider: Component<SliderProps> = (props) => {
           "accent-color": "#777",
           height: "2px",
           cursor: props.disabled ? "default" : "pointer",
-          background: "#333",
+          background: props.trackBg || "#333",
+          outline: "none",
+          "border-radius": "1px",
         }}
       />
       <input
