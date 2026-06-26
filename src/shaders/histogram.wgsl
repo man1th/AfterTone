@@ -8,7 +8,15 @@ struct LightParams {
     cg_m_h: f32, cg_m_s: f32, cg_m_l: f32,
     cg_h_h: f32, cg_h_s: f32, cg_h_l: f32,
     cg_g_h: f32, cg_g_s: f32, cg_g_l: f32,
-    pad0: f32, pad1: f32, pad2: f32, pad3: f32, pad4: f32, pad5: f32, pad6: f32, pad7: f32, pad8: f32, pad9: f32
+    cm_h_r: f32, cm_s_r: f32, cm_l_r: f32,
+    cm_h_o: f32, cm_s_o: f32, cm_l_o: f32,
+    cm_h_y: f32, cm_s_y: f32, cm_l_y: f32,
+    cm_h_g: f32, cm_s_g: f32, cm_l_g: f32,
+    cm_h_a: f32, cm_s_a: f32, cm_l_a: f32,
+    cm_h_b: f32, cm_s_b: f32, cm_l_b: f32,
+    cm_h_p: f32, cm_s_p: f32, cm_l_p: f32,
+    cm_h_m: f32, cm_s_m: f32, cm_l_m: f32,
+    pad0: f32, pad1: f32
 };
 
 @group(0) @binding(0) var<uniform> params: LightParams;
