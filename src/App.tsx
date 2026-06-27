@@ -404,6 +404,8 @@ const ColorMixerPanel: Component<{
       <style>{`
         .color-mixer-square { width: 22px; height: 22px; border-radius: 4px; cursor: pointer; transition: all 0.1s; flex-shrink: 0; }
         .color-mixer-square.active { box-shadow: 0 0 0 2px #1e1e1e, 0 0 0 4px #aaa; transform: scale(1.05); }
+        .hide-spinners::-webkit-inner-spin-button, .hide-spinners::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+        .hide-spinners { -moz-appearance: textfield; }
       `}</style>
 
       <div
@@ -467,14 +469,14 @@ const ColorMixerPanel: Component<{
                     value={props.state[`cm_s_${c.id}`]}
                     disabled={props.bypassed}
                     onChange={(v) => props.update(`cm_s_${c.id}`, v)}
-                    trackBg={`linear-gradient(to right, ${c.hex}, #888888)`}
+                    trackBg={`linear-gradient(to right, #888888, ${c.hex})`}
                   />
                   <Slider
                     label="Luminance"
                     value={props.state[`cm_l_${c.id}`]}
                     disabled={props.bypassed}
                     onChange={(v) => props.update(`cm_l_${c.id}`, v)}
-                    trackBg={`linear-gradient(to right, #ffffff, ${c.hex}, #000000)`}
+                    trackBg={`linear-gradient(to right, #000000, ${c.hex}, #ffffff)`}
                   />
                 </div>
               ),
@@ -544,7 +546,7 @@ const ColorMixerPanel: Component<{
                   value={props.state[`cm_s_${c.id}`]}
                   disabled={props.bypassed}
                   onChange={(v) => props.update(`cm_s_${c.id}`, v)}
-                  trackBg={`linear-gradient(to right, ${c.hex}, #888888)`}
+                  trackBg={`linear-gradient(to right, #888888, ${c.hex})`}
                 />
               ))}
             </div>
@@ -576,7 +578,7 @@ const ColorMixerPanel: Component<{
                   value={props.state[`cm_l_${c.id}`]}
                   disabled={props.bypassed}
                   onChange={(v) => props.update(`cm_l_${c.id}`, v)}
-                  trackBg={`linear-gradient(to right, #ffffff, ${c.hex}, #000000)`}
+                  trackBg={`linear-gradient(to right, #000000, ${c.hex}, #ffffff)`}
                 />
               ))}
             </div>
@@ -1059,14 +1061,14 @@ const App: Component = () => {
               value={lightState.temp}
               disabled={bypassed.wb}
               onChange={(v) => setLightState("temp", v)}
-              trackBg="linear-gradient(to right, #3b82f6, #fbbf24)"
+              trackBg="linear-gradient(to right, #3b82f6, #808080, #eab308)"
             />
             <Slider
               label="Tint"
               value={lightState.tint}
               disabled={bypassed.wb}
               onChange={(v) => setLightState("tint", v)}
-              trackBg="linear-gradient(to right, #22c55e, #d946ef)"
+              trackBg="linear-gradient(to right, #22c55e, #808080, #ec4899)"
             />
           </div>
         );
@@ -1102,14 +1104,14 @@ const App: Component = () => {
               value={lightState.saturation}
               disabled={bypassed.exposure}
               onChange={(v) => setLightState("saturation", v)}
-              trackBg="linear-gradient(to right, #888888 0%, #888888 35%, #8b5cf6 50%, #3b82f6 65%, #10b981 75%, #eab308 85%, #ef4444 100%)"
+              trackBg="linear-gradient(to right, #808080 35%, #8b5cf6, #3b82f6, #10b981, #eab308, #f97316, #ef4444)"
             />
             <Slider
               label="Vibrance"
               value={lightState.vibrance}
               disabled={bypassed.exposure}
               onChange={(v) => setLightState("vibrance", v)}
-              trackBg="linear-gradient(to right, #888888 0%, #888888 35%, #8b5cf6 50%, #3b82f6 65%, #10b981 75%, #eab308 85%, #ef4444 100%)"
+              trackBg="linear-gradient(to right, #808080 35%, #8b5cf6, #3b82f6, #10b981, #eab308, #f97316, #ef4444)"
             />
           </div>
         );
