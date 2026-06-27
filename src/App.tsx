@@ -282,6 +282,7 @@ const ColorGradingPanel: Component<{
           max={360}
           disabled={props.bypassed}
           onChange={(v) => props.update(`cg_${activeTab()}_h`, Math.round(v))}
+          trackBg="linear-gradient(to right, red, yellow, lime, cyan, blue, magenta, red)"
         />
         <Slider
           label="Saturation"
@@ -290,6 +291,7 @@ const ColorGradingPanel: Component<{
           max={100}
           disabled={props.bypassed}
           onChange={(v) => props.update(`cg_${activeTab()}_s`, Math.round(v))}
+          trackBg={`linear-gradient(to right, #888888, hsl(${props.state[`cg_${activeTab()}_h`]}, 100%, 50%))`}
         />
         <Slider
           label="Luminance"
@@ -298,6 +300,7 @@ const ColorGradingPanel: Component<{
           max={100}
           disabled={props.bypassed}
           onChange={(v) => props.update(`cg_${activeTab()}_l`, Math.round(v))}
+          trackBg={`linear-gradient(to right, #000000, hsl(${props.state[`cg_${activeTab()}_h`]}, 100%, 50%), #ffffff)`}
         />
       </div>
     </div>
@@ -1609,8 +1612,8 @@ const App: Component = () => {
                     "align-items": "center",
                     "justify-content": "space-between",
                     padding: "8px 14px",
-                    background: "#1e1e1e",
-                    "border-bottom": "1px solid #282828",
+                    background: "#050505",
+                    "border-bottom": "5px solid #1a1a1a",
                     cursor: "pointer",
                   }}
                   onClick={() => setExpanded(id, !expanded[id])}
@@ -1632,7 +1635,7 @@ const App: Component = () => {
                         transition: "transform 0.15s ease",
                       }}
                     />
-                    <span style={{ "font-size": "11px", color: "#AAAAAA" }}>
+                    <span style={{ "font-size": "12.5px", color: "#AAAAAA" }}>
                       {panelMeta[id].title}
                     </span>
                   </div>
