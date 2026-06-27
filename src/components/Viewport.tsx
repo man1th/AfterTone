@@ -1,11 +1,12 @@
-import { Component, createSignal, createEffect } from 'solid-js';
+import { Component, createSignal, createEffect, untrack } from 'solid-js';
 import { ZoomIn, ZoomOut, Hand, RotateCw, SquareCenterlineDashedHorizontal, SquareCenterlineDashedVertical, PaintBucket } from 'lucide-solid';
 import { generateToneCurveLUT, buildMonotonicCubicSpline } from '../utils/spline';
+import { CropOverlay } from './CropOverlay';
 import shaderCode from '../shaders/adjustments.wgsl?raw';
 import histShaderCode from '../shaders/histogram.wgsl?raw';
 
 export interface ViewportProps {
-  lightState: any; curves: any; isCompare: boolean; isOriginal: boolean;
+  lightState: any; updateLightState?: (field: string, val: any) => void; curves: any; isCompare: boolean; isOriginal: boolean;
   onHistogramUpdate: (data: number[]) => void; onHoverLuminance: (luma: number | null) => void;
   onMetadataUpdate: (meta: { iso: string; shutter: string; fstop: string }) => void;
   getExportFn: (exportFn: () => void) => void; getImportFn: (importFn: () => void) => void;
@@ -13,7 +14,8 @@ export interface ViewportProps {
 }
 
 export const Viewport: Component<ViewportProps> = (props) => {
-  let canvasRef!: HTMLCanvasElement; let originalCanvasRef!: HTMLCanvasElement; let containerRef!: HTMLDivElement; let fileInputRef!: HTMLInputElement;
+  let canvasRef!: HTMLCanvasElement; let originalCanvasRef!: HTMLCanvasElement; 
+  let containerRef!: HTMLDivElement; let imgContainerRef!: HTMLDivElement; let fileInputRef!: HTMLInputElement;
   const [hasImage, setHasImage] = createSignal(false); const [error, setError] = createSignal<string | null>(null);
   
   let device: GPUDevice; let context: GPUCanvasContext; let pipeline: GPURenderPipeline; let uniformBuffer: GPUBuffer; 
@@ -48,6 +50,13 @@ export const Viewport: Component<ViewportProps> = (props) => {
     
     canvasRef.width = pWidth; canvasRef.height = pHeight;
     originalCanvasRef.width = pWidth; originalCanvasRef.height = pHeight;
+    
+    // DIRECT DOM INJECTION: Forces the container to match the exact image size instantly
+    if (imgContainerRef) {
+      imgContainerRef.style.width = `${pWidth}px`;
+      imgContainerRef.style.height = `${pHeight}px`;
+    }
+
     context.configure({ device, format, alphaMode: 'premultiplied' }); 
     
     offscreenCanvas.width = imgBitmap.width; offscreenCanvas.height = imgBitmap.height; offscreenCtx?.drawImage(imgBitmap, 0, 0);
@@ -66,7 +75,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     curveTexture = device.createTexture({ size: [256, 1, 1], format: 'rgba8unorm', usage: GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.COPY_DST }); curveTextureView = curveTexture.createView();
     const module = device.createShaderModule({ code: shaderCode }); pipeline = device.createRenderPipeline({ layout: 'auto', vertex: { module, entryPoint: 'vs_main' }, fragment: { module, entryPoint: 'fs_main', targets: [{ format }] }, primitive: { topology: 'triangle-list' } });
     
-    // INCREASED TO 288 BYTES (72 FLOATS) TO ACCOMMODATE VIGNETTE STRUCTS
     uniformBuffer = device.createBuffer({ size: 288, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST }); const sampler = device.createSampler({ magFilter: 'linear', minFilter: 'linear' });
     bindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }] });
     exportBindGroup = device.createBindGroup({ layout: pipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: fullResTexture.createView() }, { binding: 3, resource: curveTextureView }] });
@@ -74,6 +82,11 @@ export const Viewport: Component<ViewportProps> = (props) => {
     histogramBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST }); readbackBuffer = device.createBuffer({ size: 4096, usage: GPUBufferUsage.MAP_READ | GPUBufferUsage.COPY_DST });
     computeBindGroup = device.createBindGroup({ layout: computePipeline.getBindGroupLayout(0), entries: [{ binding: 0, resource: { buffer: uniformBuffer } }, { binding: 1, resource: sampler }, { binding: 2, resource: previewTexture.createView() }, { binding: 3, resource: curveTextureView }, { binding: 4, resource: { buffer: histogramBuffer } }] });
     
+    if (props.updateLightState) {
+        props.updateLightState("crop_w_px", imgBitmap.width);
+        props.updateLightState("crop_h_px", imgBitmap.height);
+    }
+
     setHasImage(true); props.onImageChange?.(true);
     
     setTimeout(() => {
@@ -88,14 +101,15 @@ export const Viewport: Component<ViewportProps> = (props) => {
   };
 
   const renderFrame = (isExport = false) => {
-    if (!device || !context || !pipeline || !hasImage()) return;
+    if (!device || !context || !pipeline) return; 
     const now = performance.now();
     const isInteracting = (!isExport && (now - lastRenderTime < 100)) ? 1.0 : 0.0;
     lastRenderTime = now;
 
     if (isInteracting > 0.0 && !isExport) {
         clearTimeout(renderTimeout);
-        renderTimeout = setTimeout(() => { renderFrame(false); }, 150);
+        // CRITICAL FIX: 'untrack' stops SolidJS from throwing context warnings on async timeouts
+        renderTimeout = setTimeout(() => { untrack(() => renderFrame(false)); }, 150);
     }
 
     if (props.curves) { const lut = generateToneCurveLUT(props.curves.master, props.curves.red, props.curves.green, props.curves.blue); device.queue.writeTexture({ texture: curveTexture }, lut, { bytesPerRow: 1024 }, [256, 1, 1]); }
@@ -103,7 +117,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const p = props.lightState; const active = p.enabled;
     const [hr, hg, hb] = hexToRgb(p.hal_color || '#ff3300');
 
-    // 72-FLOAT EXACT ALIGNMENT MAPPING
     const paramsArray = new Float32Array([
       active ? p.exposure : 0, active ? p.contrast : 0, active ? p.highlights : 0, active ? p.shadows : 0, active ? p.whites : 0, active ? p.blacks : 0, active ? p.texture : 0, active ? p.clarity : 0, active ? p.dehaze : 0, active ? p.temp : 0, active ? p.tint : 0, active ? p.vibrance : 0, active ? p.saturation : 0,
       active ? p.hal_thresh : 80, active ? p.hal_radius : 10, hr, hg, hb, active ? p.hal_intensity : 0,
@@ -122,7 +135,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
       active ? p.cm_h_p : 0, active ? p.cm_s_p : 0, active ? p.cm_l_p : 0,
       active ? p.cm_h_m : 0, active ? p.cm_s_m : 0, active ? p.cm_l_m : 0,
       active ? p.vig_amount : 0, active ? p.vig_midpoint : 50, active ? p.vig_roundness : 0, active ? p.vig_feather : 50,
-      0, 0, 0, 0, 0, 0 // 6 PADDING FLOATS
+      0, 0, 0, 0, 0, 0 
     ]);
     device.queue.writeBuffer(uniformBuffer, 0, paramsArray);
     
@@ -133,16 +146,27 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (!isExport && !isReadingHistogram && readbackBuffer.mapState === 'unmapped') { isReadingHistogram = true; readbackBuffer.mapAsync(GPUMapMode.READ).then(() => { const array = new Uint32Array(readbackBuffer.getMappedRange()); props.onHistogramUpdate(Array.from(array)); readbackBuffer.unmap(); isReadingHistogram = false; }).catch(() => { isReadingHistogram = false; }); }
   };
 
-  const getImageSplitPercentage = () => {
-    if (!containerRef || !canvasRef || pWidth === 0) return splitPos() * 100;
-    const containerWidth = containerRef.clientWidth || window.innerWidth - 350;
-    const dividerX = containerWidth * splitPos();
-    const canvasCenterX = containerWidth / 2 + offset().x;
-    const canvasDisplayWidth = pWidth * scale();
-    const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
-    if (canvasDisplayWidth === 0) return splitPos() * 100;
-    const uvX = (dividerX - canvasLeft) / canvasDisplayWidth;
-    return Math.max(0, Math.min(100, uvX * 100));
+  const getClipPath = (isCompareCanvas = false) => {
+    const p = props.lightState;
+    const isCropped = !p.is_cropping && (p.crop_x > 0 || p.crop_y > 0 || p.crop_w < 1 || p.crop_h < 1);
+    
+    let top = isCropped ? p.crop_y * 100 : 0;
+    let right = isCropped ? (1 - (p.crop_x + p.crop_w)) * 100 : 0;
+    let bottom = isCropped ? (1 - (p.crop_y + p.crop_h)) * 100 : 0;
+    let left = isCropped ? p.crop_x * 100 : 0;
+
+    if (isCompareCanvas) {
+      const containerWidth = containerRef.clientWidth || window.innerWidth - 350;
+      const dividerX = containerWidth * splitPos();
+      const canvasCenterX = containerWidth / 2 + offset().x;
+      const canvasDisplayWidth = pWidth * scale();
+      const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
+      const splitPercent = Math.max(0, Math.min(100, ((dividerX - canvasLeft) / canvasDisplayWidth) * 100));
+      left = Math.max(left, splitPercent);
+    }
+
+    if (top === 0 && right === 0 && bottom === 0 && left === 0) return 'none';
+    return `inset(${top}% ${right}% ${bottom}% ${left}%)`;
   };
 
   const handleMouseMove = (e: MouseEvent) => {
@@ -155,13 +179,12 @@ export const Viewport: Component<ViewportProps> = (props) => {
     const imgX = Math.floor(rx * imgBitmap.width); const imgY = Math.floor(ry * imgBitmap.height);
     try {
       const p = offscreenCtx.getImageData(imgX, imgY, 1, 1).data; let r = p[0] / 255; let g = p[1] / 255; let b = p[2] / 255;
-      const uvSplit = getImageSplitPercentage() / 100;
-      if (props.lightState.enabled && (!props.isCompare || rx >= uvSplit)) {
+      if (props.lightState.enabled && (!props.isCompare || rx >= splitPos())) {
         const l = props.lightState; const t_val = l.temp / 100; const tint_val = l.tint / 100; r *= (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); g *= (1.0 - (tint_val * 0.14)); b *= (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); const exp = Math.pow(2, l.exposure / 50); r *= exp; g *= exp; b *= exp; const c = (l.contrast / 100) + 1; r = (r - 0.5) * c + 0.5; g = (g - 0.5) * c + 0.5; b = (b - 0.5) * c + 0.5;
         const baseLuma = 0.299 * r + 0.587 * g + 0.114 * b; const sMask = 1.0 - Math.max(0, Math.min(1, baseLuma / 0.5)); const hMask = Math.max(0, Math.min(1, (baseLuma - 0.5) / 0.5)); r += r * (l.shadows / 100) * sMask + r * (l.highlights / 100) * hMask; g += g * (l.shadows / 100) * sMask + g * (l.highlights / 100) * hMask; b += b * (l.shadows / 100) * sMask + b * (l.highlights / 100) * hMask;
         const w_p = 1.0 - (l.whites / 200); const b_p = 0.0 - (l.blacks / 200); r = (r - b_p) / (w_p - b_p); g = (g - b_p) / (w_p - b_p); b = (b - b_p) / (w_p - b_p);
       }
-      if (props.curves && (!props.isCompare || rx >= uvSplit)) {
+      if (props.curves && (!props.isCompare || rx >= splitPos())) {
         const evalM = buildMonotonicCubicSpline(props.curves.master); r = evalM(Math.max(0, Math.min(1, r))); g = evalM(Math.max(0, Math.min(1, g))); b = evalM(Math.max(0, Math.min(1, b)));
         r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r))); g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, r))); b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
       }
@@ -173,7 +196,18 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (!device || !hasImage() || !canvasRef || !imgBitmap) return; 
     canvasRef.width = imgBitmap.width; canvasRef.height = imgBitmap.height; const format = navigator.gpu.getPreferredCanvasFormat(); context.configure({ device, format, alphaMode: 'premultiplied' }); 
     renderFrame(true); await device.queue.onSubmittedWorkDone();
-    const dataUrl = canvasRef.toDataURL('image/png'); const link = document.createElement('a'); link.download = 'aftertone-processed.png'; link.href = dataUrl; link.click(); 
+    
+    const cropW = Math.max(1, Math.floor(props.lightState.crop_w * imgBitmap.width));
+    const cropH = Math.max(1, Math.floor(props.lightState.crop_h * imgBitmap.height));
+    const cropX = Math.floor(props.lightState.crop_x * imgBitmap.width);
+    const cropY = Math.floor(props.lightState.crop_y * imgBitmap.height);
+
+    const finalCanvas = document.createElement('canvas');
+    finalCanvas.width = cropW; finalCanvas.height = cropH;
+    const finalCtx = finalCanvas.getContext('2d');
+    finalCtx?.drawImage(canvasRef, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    const dataUrl = finalCanvas.toDataURL('image/png'); const link = document.createElement('a'); link.download = 'aftertone-processed.png'; link.href = dataUrl; link.click(); 
     canvasRef.width = pWidth; canvasRef.height = pHeight; context.configure({ device, format, alphaMode: 'premultiplied' }); renderFrame(false);
   });
   
@@ -181,7 +215,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
 
   createEffect(() => { 
       const deps = [props.lightState.enabled, props.lightState.exposure, props.lightState.contrast, props.lightState.highlights, props.lightState.shadows, props.lightState.whites, props.lightState.blacks, props.lightState.texture, props.lightState.clarity, props.lightState.dehaze, props.lightState.temp, props.lightState.tint, props.lightState.vibrance, props.lightState.saturation, props.lightState.hal_thresh, props.lightState.hal_radius, props.lightState.hal_color, props.lightState.hal_intensity, props.lightState.bloom_intensity, props.lightState.show_hal_map, props.lightState.grain_amount, props.lightState.grain_size, props.lightState.grain_roughness, props.lightState.grain_color_variance, props.lightState.cg_s_h, props.lightState.cg_s_s, props.lightState.cg_s_l, props.lightState.cg_m_h, props.lightState.cg_m_s, props.lightState.cg_m_l, props.lightState.cg_h_h, props.lightState.cg_h_s, props.lightState.cg_h_l, props.lightState.cg_g_h, props.lightState.cg_g_s, props.lightState.cg_g_l, props.lightState.cm_h_r, props.lightState.cm_s_r, props.lightState.cm_l_r, props.lightState.cm_h_o, props.lightState.cm_s_o, props.lightState.cm_l_o, props.lightState.cm_h_y, props.lightState.cm_s_y, props.lightState.cm_l_y, props.lightState.cm_h_g, props.lightState.cm_s_g, props.lightState.cm_l_g, props.lightState.cm_h_a, props.lightState.cm_s_a, props.lightState.cm_l_a, props.lightState.cm_h_b, props.lightState.cm_s_b, props.lightState.cm_l_b, props.lightState.cm_h_p, props.lightState.cm_s_p, props.lightState.cm_l_p, props.lightState.cm_h_m, props.lightState.cm_s_m, props.lightState.cm_l_m, props.lightState.vig_amount, props.lightState.vig_midpoint, props.lightState.vig_roundness, props.lightState.vig_feather, props.curves]; 
-      renderFrame(false); 
+      untrack(() => renderFrame(false));
   });
   
   const handleFileUpload = async (e: Event) => { const file = (e.target as HTMLInputElement).files?.[0]; if (!file) return; const bmp = await createImageBitmap(file); initWebGPU(bmp); };
@@ -192,8 +226,20 @@ export const Viewport: Component<ViewportProps> = (props) => {
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(28, 28, 28, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '2px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none', border: '1px solid #333' }}><button onClick={() => setScale(s => Math.min(30, s * 1.25))} style={iconBtnStyle}><ZoomIn size={15} /></button><button onClick={() => setScale(s => Math.max(0.05, s / 1.25))} style={iconBtnStyle}><ZoomOut size={15} /></button><button onClick={() => { setOffset({ x: 0, y: 0 }); const scaleX = ((containerRef?.clientWidth || window.innerWidth - 350) - 40) / pWidth; const scaleY = ((containerRef?.clientHeight || window.innerHeight - 100) - 40) / pHeight; setScale(Math.min(scaleX, scaleY)); }} style={iconBtnStyle}><Hand size={15} /></button><div style={{ width: '1px', background: '#444', margin: '4px' }}></div><button onClick={() => setRotation(r => (r + 90) % 360)} style={iconBtnStyle}><RotateCw size={15} /></button><button onClick={() => setFlipX(x => x * -1)} style={iconBtnStyle}><SquareCenterlineDashedHorizontal size={15} /></button><button onClick={() => setFlipY(y => y * -1)} style={iconBtnStyle}><SquareCenterlineDashedVertical size={15} /></button></div>
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
-      <canvas ref={originalCanvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, display: props.isCompare && hasImage() ? 'block' : 'none' }} />
-      <canvas ref={canvasRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 2, display: hasImage() ? 'block' : 'none', 'clip-path': props.isCompare ? `inset(0 0 0 ${getImageSplitPercentage()}%)` : 'none', 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
+      {/* CRITICAL FIX: Parent div uses imgContainerRef for native width/height injection! */}
+      <div ref={imgContainerRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, transition: 'clip-path 0.2s ease-out', display: hasImage() ? 'block' : 'none' }}>
+        <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', display: props.isCompare ? 'block' : 'none', 'clip-path': getClipPath(true) }} />
+        <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPath(false), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
+        <CropOverlay 
+          isActive={props.lightState.is_cropping}
+          onConfirm={() => { if(props.updateLightState) props.updateLightState('is_cropping', false); }}
+          cropRect={{x: props.lightState.crop_x, y: props.lightState.crop_y, w: props.lightState.crop_w, h: props.lightState.crop_h}}
+          setCropRect={(r) => { if(props.updateLightState){ props.updateLightState('crop_x', r.x); props.updateLightState('crop_y', r.y); props.updateLightState('crop_w', r.w); props.updateLightState('crop_h', r.h); if(imgBitmap) { props.updateLightState('crop_w_px', r.w * imgBitmap.width); props.updateLightState('crop_h_px', r.h * imgBitmap.height); } } }}
+          aspectRatio={props.lightState.crop_aspect}
+          orientation={props.lightState.crop_orientation}
+          setOrientation={(o) => { if(props.updateLightState) props.updateLightState('crop_orientation', o); }}
+        />
+      </div>
       
       {props.isCompare && hasImage() && (
         <div onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); isDraggingSplitter = true; }} onPointerMove={(e) => { if (isDraggingSplitter) { e.stopPropagation(); const rect = containerRef.getBoundingClientRect(); setSplitPos(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))); } }} onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture(e.pointerId); isDraggingSplitter = false; }} style={{ position: 'absolute', top: 0, bottom: 0, left: `${splitPos() * 100}%`, width: '40px', 'margin-left': '-20px', cursor: 'ew-resize', 'z-index': 100, display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'touch-action': 'none' }}>
