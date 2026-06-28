@@ -1,4 +1,4 @@
-import { Component, Show, createSignal, onCleanup } from "solid-js";
+import { Component, Show, createSignal, onCleanup, createEffect, untrack } from "solid-js";
 
 interface CropOverlayProps {
   isActive: boolean;
@@ -7,6 +7,7 @@ interface CropOverlayProps {
   setCropRect: (r: { x: number; y: number; w: number; h: number }) => void;
   aspectRatio: string;
   orientation: "landscape" | "portrait";
+  cropLocked: boolean;
   setOrientation: (o: "landscape" | "portrait") => void;
 }
 
@@ -14,6 +15,38 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
   let containerRef!: HTMLDivElement;
   let dragState: any = null;
   const [isDragging, setIsDragging] = createSignal(false);
+
+  // Instantly updates the box shape visually when the dropdown changes
+  createEffect((prevDeps) => {
+    const currentDeps = `${props.aspectRatio}-${props.orientation}`;
+    if (prevDeps === currentDeps) return currentDeps;
+
+    untrack(() => {
+      if (props.aspectRatio !== "custom" && containerRef) {
+        const parts = props.aspectRatio.split("x").map(Number);
+        if (parts.length === 2) {
+          const rect = containerRef.getBoundingClientRect();
+          if (rect.width > 0 && rect.height > 0) {
+            const targetRatio = props.orientation === "landscape" ? parts[0] / parts[1] : parts[1] / parts[0];
+            let { x, y, w, h } = props.cropRect;
+            let newH = (w * rect.width) / targetRatio / rect.height;
+            let newW = w;
+            
+            if (newH > 1 || y + newH > 1) {
+              newH = Math.min(1, 1 - y);
+              newW = (newH * rect.height * targetRatio) / rect.width;
+            }
+            if (newW > 1 || x + newW > 1) {
+              newW = Math.min(1, 1 - x);
+              newH = (newW * rect.width) / targetRatio / rect.height;
+            }
+            props.setCropRect({ x, y, w: newW, h: newH });
+          }
+        }
+      }
+    });
+    return currentDeps;
+  }, `${props.aspectRatio}-${props.orientation}`);
 
   const handlePointerDown = (e: PointerEvent, type: string) => {
     e.stopPropagation();
@@ -43,38 +76,29 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
     let newW = initCrop.w;
     let newH = initCrop.h;
 
-    // 1. Handle Translation (Moving the whole box)
+    const isLocked = props.cropLocked && props.aspectRatio === "custom";
+
     if (type === "body") {
       newX = Math.max(0, Math.min(1 - newW, initCrop.x + dx));
       newY = Math.max(0, Math.min(1 - newH, initCrop.y + dy));
     } 
-    // 2. Handle Edge/Corner Scaling
     else {
       if (type.includes("w")) { newX = Math.max(0, Math.min(initCrop.x + initCrop.w - 0.05, initCrop.x + dx)); newW = initCrop.w + (initCrop.x - newX); }
       if (type.includes("e")) { newW = Math.max(0.05, Math.min(1 - initCrop.x, initCrop.w + dx)); }
       if (type.includes("n")) { newY = Math.max(0, Math.min(initCrop.y + initCrop.h - 0.05, initCrop.y + dy)); newH = initCrop.h + (initCrop.y - newY); }
       if (type.includes("s")) { newH = Math.max(0.05, Math.min(1 - initCrop.y, initCrop.h + dy)); }
 
-      // 3. Apply Aspect Ratio Constraints
-      if (props.aspectRatio !== "free" && props.aspectRatio !== "original") {
+      if (props.aspectRatio !== "custom" || isLocked) {
         let ratio = 1;
-        const parts = props.aspectRatio.split("x").map(Number);
-        if (parts.length === 2) {
-          ratio = props.orientation === "landscape" ? parts[0] / parts[1] : parts[1] / parts[0];
+        if (isLocked) {
+          ratio = (initCrop.w * containerW) / (initCrop.h * containerH);
+        } else {
+          const parts = props.aspectRatio.split("x").map(Number);
+          if (parts.length === 2) {
+            ratio = props.orientation === "landscape" ? parts[0] / parts[1] : parts[1] / parts[0];
+          }
         }
 
-        const currentRatio = (newW * containerW) / (newH * containerH);
-        
-        // Auto-flip orientation if pulled aggressively
-        if (props.orientation === "landscape" && currentRatio < 0.8) {
-             props.setOrientation("portrait");
-             ratio = parts[1] / parts[0];
-        } else if (props.orientation === "portrait" && currentRatio > 1.25) {
-             props.setOrientation("landscape");
-             ratio = parts[0] / parts[1];
-        }
-
-        // Lock geometry based on which handle is pulled
         if (type.includes("e") || type.includes("w")) {
           newH = (newW * containerW) / ratio / containerH;
           if (newY + newH > 1) { newH = 1 - newY; newW = (newH * containerH * ratio) / containerW; }
@@ -100,56 +124,54 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
     document.removeEventListener("pointerup", handlePointerUp);
   });
 
-  const handleStyle = { position: "absolute", width: "16px", height: "16px", background: "transparent", "z-index": 10 };
-  const cornerMarkStyle = { position: "absolute", background: "#fff", "pointer-events": "none" };
+  // Vastly larger/thicker click targets and visual indicators
+  const handleStyle = { position: "absolute", width: "24px", height: "24px", background: "transparent", "z-index": 10 };
+  const cornerMarkStyle = { position: "absolute", background: "#fff", "pointer-events": "none", "box-shadow": "0 0 4px rgba(0,0,0,0.5)" };
+  const gridLine = { "border-right": "2px solid rgba(255,255,255,0.6)", "border-bottom": "2px solid rgba(255,255,255,0.6)" };
 
   return (
     <Show when={props.isActive}>
       <div ref={containerRef} style={{ position: "absolute", inset: 0, "z-index": 100, "pointer-events": "auto" }}>
         
-        {/* The Dark Overlay with a Hole Cut Out */}
-        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", "clip-path": `polygon(0% 0%, 0% 100%, 100% 100%, 100% 0%, 0% 0%, ${props.cropRect.x * 100}% ${props.cropRect.y * 100}%, ${(props.cropRect.x + props.cropRect.w) * 100}% ${props.cropRect.y * 100}%, ${(props.cropRect.x + props.cropRect.w) * 100}% ${(props.cropRect.y + props.cropRect.h) * 100}%, ${props.cropRect.x * 100}% ${(props.cropRect.y + props.cropRect.h) * 100}%, ${props.cropRect.x * 100}% ${props.cropRect.y * 100}%)`, transition: isDragging() ? "none" : "clip-path 0.1s ease-out" }} />
+        <div style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.7)", "clip-path": `polygon(0% 0%, 0% 100%, 100% 100%, 100% 0%, 0% 0%, ${props.cropRect.x * 100}% ${props.cropRect.y * 100}%, ${(props.cropRect.x + props.cropRect.w) * 100}% ${props.cropRect.y * 100}%, ${(props.cropRect.x + props.cropRect.w) * 100}% ${(props.cropRect.y + props.cropRect.h) * 100}%, ${props.cropRect.x * 100}% ${(props.cropRect.y + props.cropRect.h) * 100}%, ${props.cropRect.x * 100}% ${props.cropRect.y * 100}%)`, transition: isDragging() ? "none" : "clip-path 0.15s cubic-bezier(0.2, 0, 0, 1)" }} />
 
-        {/* The Active Crop Box */}
         <div
           onPointerDown={(e) => handlePointerDown(e, "body")}
-          style={{ position: "absolute", left: `${props.cropRect.x * 100}%`, top: `${props.cropRect.y * 100}%`, width: `${props.cropRect.w * 100}%`, height: `${props.cropRect.h * 100}%`, border: "1px solid rgba(255,255,255,0.8)", cursor: "move", display: "grid", "grid-template-columns": "1fr 1fr 1fr", "grid-template-rows": "1fr 1fr 1fr", transition: isDragging() ? "none" : "all 0.1s ease-out" }}
+          style={{ position: "absolute", left: `${props.cropRect.x * 100}%`, top: `${props.cropRect.y * 100}%`, width: `${props.cropRect.w * 100}%`, height: `${props.cropRect.h * 100}%`, border: "2.5px solid rgba(255,255,255,0.9)", "box-shadow": "0 0 8px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.5)", cursor: "move", display: "grid", "grid-template-columns": "1fr 1fr 1fr", "grid-template-rows": "1fr 1fr 1fr", transition: isDragging() ? "none" : "all 0.15s cubic-bezier(0.2, 0, 0, 1)" }}
         >
-          {/* 3x3 Composition Grid (Only visible while dragging) */}
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-bottom": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "1px solid rgba(255,255,255,0.3)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-bottom": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-bottom": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-right": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-right": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
           <div></div>
 
-          {/* Invisible Interaction Handles & Visual Corner Marks */}
-          <div onPointerDown={(e) => handlePointerDown(e, "nw")} style={{ ...handleStyle as any, top: "-8px", left: "-8px", cursor: "nwse-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, top: "8px", left: "8px", width: "12px", height: "3px" }}></div><div style={{ ...cornerMarkStyle as any, top: "8px", left: "8px", width: "3px", height: "12px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "nw")} style={{ ...handleStyle as any, top: "-12px", left: "-12px", cursor: "nwse-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, top: "10px", left: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, top: "10px", left: "10px", width: "4px", height: "24px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "n")} style={{ ...handleStyle as any, top: "-8px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
-             <div style={{ ...cornerMarkStyle as any, top: "8px", left: "50%", transform: "translateX(-50%)", width: "16px", height: "3px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "n")} style={{ ...handleStyle as any, top: "-12px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
+             <div style={{ ...cornerMarkStyle as any, top: "10px", left: "50%", transform: "translateX(-50%)", width: "32px", height: "4px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "ne")} style={{ ...handleStyle as any, top: "-8px", right: "-8px", cursor: "nesw-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, top: "8px", right: "8px", width: "12px", height: "3px" }}></div><div style={{ ...cornerMarkStyle as any, top: "8px", right: "8px", width: "3px", height: "12px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "ne")} style={{ ...handleStyle as any, top: "-12px", right: "-12px", cursor: "nesw-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, top: "10px", right: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, top: "10px", right: "10px", width: "4px", height: "24px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "e")} style={{ ...handleStyle as any, top: "50%", right: "-8px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, right: "8px", top: "50%", transform: "translateY(-50%)", width: "3px", height: "16px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "e")} style={{ ...handleStyle as any, top: "50%", right: "-12px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, right: "10px", top: "50%", transform: "translateY(-50%)", width: "4px", height: "32px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "se")} style={{ ...handleStyle as any, bottom: "-8px", right: "-8px", cursor: "nwse-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, bottom: "8px", right: "8px", width: "12px", height: "3px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "8px", right: "8px", width: "3px", height: "12px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "se")} style={{ ...handleStyle as any, bottom: "-12px", right: "-12px", cursor: "nwse-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, bottom: "10px", right: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "10px", right: "10px", width: "4px", height: "24px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "s")} style={{ ...handleStyle as any, bottom: "-8px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
-             <div style={{ ...cornerMarkStyle as any, bottom: "8px", left: "50%", transform: "translateX(-50%)", width: "16px", height: "3px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "s")} style={{ ...handleStyle as any, bottom: "-12px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
+             <div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "50%", transform: "translateX(-50%)", width: "32px", height: "4px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "sw")} style={{ ...handleStyle as any, bottom: "-8px", left: "-8px", cursor: "nesw-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, bottom: "8px", left: "8px", width: "12px", height: "3px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "8px", left: "8px", width: "3px", height: "12px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "sw")} style={{ ...handleStyle as any, bottom: "-12px", left: "-12px", cursor: "nesw-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "10px", width: "4px", height: "24px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "w")} style={{ ...handleStyle as any, top: "50%", left: "-8px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, left: "8px", top: "50%", transform: "translateY(-50%)", width: "3px", height: "16px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "w")} style={{ ...handleStyle as any, top: "50%", left: "-12px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, left: "10px", top: "50%", transform: "translateY(-50%)", width: "4px", height: "32px" }}></div>
           </div>
         </div>
       </div>

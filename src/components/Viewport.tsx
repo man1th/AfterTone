@@ -51,7 +51,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     canvasRef.width = pWidth; canvasRef.height = pHeight;
     originalCanvasRef.width = pWidth; originalCanvasRef.height = pHeight;
     
-    // DIRECT DOM INJECTION: Forces the container to match the exact image size instantly
     if (imgContainerRef) {
       imgContainerRef.style.width = `${pWidth}px`;
       imgContainerRef.style.height = `${pHeight}px`;
@@ -108,7 +107,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
 
     if (isInteracting > 0.0 && !isExport) {
         clearTimeout(renderTimeout);
-        // CRITICAL FIX: 'untrack' stops SolidJS from throwing context warnings on async timeouts
         renderTimeout = setTimeout(() => { untrack(() => renderFrame(false)); }, 150);
     }
 
@@ -226,10 +224,11 @@ export const Viewport: Component<ViewportProps> = (props) => {
       <div style={{ position: 'absolute', top: '12px', right: '12px', background: 'rgba(28, 28, 28, 0.85)', padding: '4px', 'border-radius': '6px', display: 'flex', gap: '2px', 'backdrop-filter': 'blur(8px)', 'z-index': 10, opacity: hasImage() ? 1 : 0.5, 'pointer-events': hasImage() ? 'auto' : 'none', border: '1px solid #333' }}><button onClick={() => setScale(s => Math.min(30, s * 1.25))} style={iconBtnStyle}><ZoomIn size={15} /></button><button onClick={() => setScale(s => Math.max(0.05, s / 1.25))} style={iconBtnStyle}><ZoomOut size={15} /></button><button onClick={() => { setOffset({ x: 0, y: 0 }); const scaleX = ((containerRef?.clientWidth || window.innerWidth - 350) - 40) / pWidth; const scaleY = ((containerRef?.clientHeight || window.innerHeight - 100) - 40) / pHeight; setScale(Math.min(scaleX, scaleY)); }} style={iconBtnStyle}><Hand size={15} /></button><div style={{ width: '1px', background: '#444', margin: '4px' }}></div><button onClick={() => setRotation(r => (r + 90) % 360)} style={iconBtnStyle}><RotateCw size={15} /></button><button onClick={() => setFlipX(x => x * -1)} style={iconBtnStyle}><SquareCenterlineDashedHorizontal size={15} /></button><button onClick={() => setFlipY(y => y * -1)} style={iconBtnStyle}><SquareCenterlineDashedVertical size={15} /></button></div>
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
-      {/* CRITICAL FIX: Parent div uses imgContainerRef for native width/height injection! */}
       <div ref={imgContainerRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, transition: 'clip-path 0.2s ease-out', display: hasImage() ? 'block' : 'none' }}>
         <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', display: props.isCompare ? 'block' : 'none', 'clip-path': getClipPath(true) }} />
         <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPath(false), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
+        
+        {/* WE INJECT THE NEW cropLocked PROP HERE */}
         <CropOverlay 
           isActive={props.lightState.is_cropping}
           onConfirm={() => { if(props.updateLightState) props.updateLightState('is_cropping', false); }}
@@ -237,6 +236,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
           setCropRect={(r) => { if(props.updateLightState){ props.updateLightState('crop_x', r.x); props.updateLightState('crop_y', r.y); props.updateLightState('crop_w', r.w); props.updateLightState('crop_h', r.h); if(imgBitmap) { props.updateLightState('crop_w_px', r.w * imgBitmap.width); props.updateLightState('crop_h_px', r.h * imgBitmap.height); } } }}
           aspectRatio={props.lightState.crop_aspect}
           orientation={props.lightState.crop_orientation}
+          cropLocked={props.lightState.crop_locked}
           setOrientation={(o) => { if(props.updateLightState) props.updateLightState('crop_orientation', o); }}
         />
       </div>
