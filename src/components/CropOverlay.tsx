@@ -124,10 +124,10 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
     document.removeEventListener("pointerup", handlePointerUp);
   });
 
-  // Vastly larger/thicker click targets and visual indicators
-  const handleStyle = { position: "absolute", width: "24px", height: "24px", background: "transparent", "z-index": 10 };
-  const cornerMarkStyle = { position: "absolute", background: "#fff", "pointer-events": "none", "box-shadow": "0 0 4px rgba(0,0,0,0.5)" };
-  const gridLine = { "border-right": "2px solid rgba(255,255,255,0.6)", "border-bottom": "2px solid rgba(255,255,255,0.6)" };
+  // Massive Hitboxes and Visually Dominant Handles
+  const handleStyle = { position: "absolute", width: "40px", height: "40px", background: "transparent", "z-index": 10 };
+  const cornerMarkStyle = { position: "absolute", background: "#fff", "pointer-events": "none", "box-shadow": "0 0 6px rgba(0,0,0,0.8)" };
+  const gridLine = { "border-right": "3px solid rgba(255,255,255,0.6)", "border-bottom": "3px solid rgba(255,255,255,0.6)" };
 
   return (
     <Show when={props.isActive}>
@@ -137,41 +137,41 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
 
         <div
           onPointerDown={(e) => handlePointerDown(e, "body")}
-          style={{ position: "absolute", left: `${props.cropRect.x * 100}%`, top: `${props.cropRect.y * 100}%`, width: `${props.cropRect.w * 100}%`, height: `${props.cropRect.h * 100}%`, border: "2.5px solid rgba(255,255,255,0.9)", "box-shadow": "0 0 8px rgba(0,0,0,0.5), inset 0 0 8px rgba(0,0,0,0.5)", cursor: "move", display: "grid", "grid-template-columns": "1fr 1fr 1fr", "grid-template-rows": "1fr 1fr 1fr", transition: isDragging() ? "none" : "all 0.15s cubic-bezier(0.2, 0, 0, 1)" }}
+          style={{ position: "absolute", left: `${props.cropRect.x * 100}%`, top: `${props.cropRect.y * 100}%`, width: `${props.cropRect.w * 100}%`, height: `${props.cropRect.h * 100}%`, border: "3px solid rgba(255,255,255,0.95)", "box-shadow": "0 0 10px rgba(0,0,0,0.6), inset 0 0 10px rgba(0,0,0,0.6)", cursor: "move", display: "grid", "grid-template-columns": "1fr 1fr 1fr", "grid-template-rows": "1fr 1fr 1fr", transition: isDragging() ? "none" : "all 0.15s cubic-bezier(0.2, 0, 0, 1)" }}
         >
           <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
           <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-bottom": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-bottom": "3px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
           <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
           <div style={{ ...gridLine as any, opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-bottom": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
-          <div style={{ "border-right": "2px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-bottom": "3px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-right": "3px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
+          <div style={{ "border-right": "3px solid rgba(255,255,255,0.6)", opacity: isDragging() ? 1 : 0, transition: "opacity 0.2s" }}></div>
           <div></div>
 
-          <div onPointerDown={(e) => handlePointerDown(e, "nw")} style={{ ...handleStyle as any, top: "-12px", left: "-12px", cursor: "nwse-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, top: "10px", left: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, top: "10px", left: "10px", width: "4px", height: "24px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "nw")} style={{ ...handleStyle as any, top: "-20px", left: "-20px", cursor: "nwse-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, top: "17px", left: "17px", width: "32px", height: "6px" }}></div><div style={{ ...cornerMarkStyle as any, top: "17px", left: "17px", width: "6px", height: "32px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "n")} style={{ ...handleStyle as any, top: "-12px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
-             <div style={{ ...cornerMarkStyle as any, top: "10px", left: "50%", transform: "translateX(-50%)", width: "32px", height: "4px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "n")} style={{ ...handleStyle as any, top: "-20px", left: "50%", transform: "translateX(-50%)", width: "60%", cursor: "ns-resize" }}>
+             <div style={{ ...cornerMarkStyle as any, top: "17px", left: "50%", transform: "translateX(-50%)", width: "40px", height: "6px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "ne")} style={{ ...handleStyle as any, top: "-12px", right: "-12px", cursor: "nesw-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, top: "10px", right: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, top: "10px", right: "10px", width: "4px", height: "24px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "ne")} style={{ ...handleStyle as any, top: "-20px", right: "-20px", cursor: "nesw-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, top: "17px", right: "17px", width: "32px", height: "6px" }}></div><div style={{ ...cornerMarkStyle as any, top: "17px", right: "17px", width: "6px", height: "32px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "e")} style={{ ...handleStyle as any, top: "50%", right: "-12px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, right: "10px", top: "50%", transform: "translateY(-50%)", width: "4px", height: "32px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "e")} style={{ ...handleStyle as any, top: "50%", right: "-20px", transform: "translateY(-50%)", height: "60%", cursor: "ew-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, right: "17px", top: "50%", transform: "translateY(-50%)", width: "6px", height: "40px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "se")} style={{ ...handleStyle as any, bottom: "-12px", right: "-12px", cursor: "nwse-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, bottom: "10px", right: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "10px", right: "10px", width: "4px", height: "24px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "se")} style={{ ...handleStyle as any, bottom: "-20px", right: "-20px", cursor: "nwse-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, bottom: "17px", right: "17px", width: "32px", height: "6px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "17px", right: "17px", width: "6px", height: "32px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "s")} style={{ ...handleStyle as any, bottom: "-12px", left: "50%", transform: "translateX(-50%)", width: "50%", cursor: "ns-resize" }}>
-             <div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "50%", transform: "translateX(-50%)", width: "32px", height: "4px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "s")} style={{ ...handleStyle as any, bottom: "-20px", left: "50%", transform: "translateX(-50%)", width: "60%", cursor: "ns-resize" }}>
+             <div style={{ ...cornerMarkStyle as any, bottom: "17px", left: "50%", transform: "translateX(-50%)", width: "40px", height: "6px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "sw")} style={{ ...handleStyle as any, bottom: "-12px", left: "-12px", cursor: "nesw-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "10px", width: "24px", height: "4px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "10px", left: "10px", width: "4px", height: "24px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "sw")} style={{ ...handleStyle as any, bottom: "-20px", left: "-20px", cursor: "nesw-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, bottom: "17px", left: "17px", width: "32px", height: "6px" }}></div><div style={{ ...cornerMarkStyle as any, bottom: "17px", left: "17px", width: "6px", height: "32px" }}></div>
           </div>
-          <div onPointerDown={(e) => handlePointerDown(e, "w")} style={{ ...handleStyle as any, top: "50%", left: "-12px", transform: "translateY(-50%)", height: "50%", cursor: "ew-resize" }}>
-            <div style={{ ...cornerMarkStyle as any, left: "10px", top: "50%", transform: "translateY(-50%)", width: "4px", height: "32px" }}></div>
+          <div onPointerDown={(e) => handlePointerDown(e, "w")} style={{ ...handleStyle as any, top: "50%", left: "-20px", transform: "translateY(-50%)", height: "60%", cursor: "ew-resize" }}>
+            <div style={{ ...cornerMarkStyle as any, left: "17px", top: "50%", transform: "translateY(-50%)", width: "6px", height: "40px" }}></div>
           </div>
         </div>
       </div>
