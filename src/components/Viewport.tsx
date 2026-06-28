@@ -1,5 +1,5 @@
 import { Component, createSignal, createEffect, untrack } from 'solid-js';
-import { ZoomIn, ZoomOut, Hand, RotateCw, SquareCenterlineDashedHorizontal, SquareCenterlineDashedVertical, PaintBucket } from 'lucide-solid';
+import { ZoomIn, ZoomOut, Hand, RotateCw, SquareCenterlineDashedHorizontal, SquareCenterlineDashedVertical, PaintBucket, ChevronLeft, ChevronRight } from 'lucide-solid';
 import { generateToneCurveLUT, buildMonotonicCubicSpline } from '../utils/spline';
 import { CropOverlay } from './CropOverlay';
 import shaderCode from '../shaders/adjustments.wgsl?raw';
@@ -15,7 +15,7 @@ export interface ViewportProps {
 
 export const Viewport: Component<ViewportProps> = (props) => {
   let canvasRef!: HTMLCanvasElement; let originalCanvasRef!: HTMLCanvasElement; 
-  let containerRef!: HTMLDivElement; let imgContainerRef!: HTMLDivElement; let fileInputRef!: HTMLInputElement;
+  let containerRef!: HTMLDivElement; let imgContainerRef!: HTMLDivElement; let originalImgContainerRef!: HTMLDivElement; let fileInputRef!: HTMLInputElement;
   const [hasImage, setHasImage] = createSignal(false); const [error, setError] = createSignal<string | null>(null);
   
   let device: GPUDevice; let context: GPUCanvasContext; let pipeline: GPURenderPipeline; let uniformBuffer: GPUBuffer; 
@@ -54,6 +54,10 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (imgContainerRef) {
       imgContainerRef.style.width = `${pWidth}px`;
       imgContainerRef.style.height = `${pHeight}px`;
+    }
+    if (originalImgContainerRef) {
+      originalImgContainerRef.style.width = `${pWidth}px`;
+      originalImgContainerRef.style.height = `${pHeight}px`;
     }
 
     context.configure({ device, format, alphaMode: 'premultiplied' }); 
@@ -144,7 +148,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (!isExport && !isReadingHistogram && readbackBuffer.mapState === 'unmapped') { isReadingHistogram = true; readbackBuffer.mapAsync(GPUMapMode.READ).then(() => { const array = new Uint32Array(readbackBuffer.getMappedRange()); props.onHistogramUpdate(Array.from(array)); readbackBuffer.unmap(); isReadingHistogram = false; }).catch(() => { isReadingHistogram = false; }); }
   };
 
-  const getClipPath = (isCompareCanvas = false) => {
+  const getClipPathBase = () => {
     const p = props.lightState;
     const isCropped = !p.is_cropping && (p.crop_x > 0 || p.crop_y > 0 || p.crop_w < 1 || p.crop_h < 1);
     
@@ -152,20 +156,6 @@ export const Viewport: Component<ViewportProps> = (props) => {
     let right = isCropped ? (1 - (p.crop_x + p.crop_w)) * 100 : 0;
     let bottom = isCropped ? (1 - (p.crop_y + p.crop_h)) * 100 : 0;
     let left = isCropped ? p.crop_x * 100 : 0;
-
-    if (props.isCompare) {
-      const containerWidth = containerRef.clientWidth || window.innerWidth - 350;
-      const dividerX = containerWidth * splitPos();
-      const canvasCenterX = containerWidth / 2 + offset().x;
-      const canvasDisplayWidth = pWidth * scale();
-      const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
-      const splitPercent = Math.max(0, Math.min(100, ((dividerX - canvasLeft) / canvasDisplayWidth) * 100));
-      
-      // FIX: Left clip applied ONLY to original layer to show the adjusted image on the left!
-      if (isCompareCanvas) {
-        left = Math.max(left, splitPercent);
-      }
-    }
 
     if (top === 0 && right === 0 && bottom === 0 && left === 0) return 'none';
     return `inset(${top}% ${right}% ${bottom}% ${left}%)`;
@@ -175,18 +165,22 @@ export const Viewport: Component<ViewportProps> = (props) => {
     if (!hasImage() || !offscreenCtx || isDragging) return;
     const rect = canvasRef.getBoundingClientRect(); let rx = (e.clientX - rect.left) / rect.width; let ry = (e.clientY - rect.top) / rect.height;
     if (rx < 0 || rx > 1 || ry < 0 || ry > 1) { props.onHoverLuminance(null); return; }
+    
+    const contRect = containerRef.getBoundingClientRect();
+    const isHoveringAdjusted = !props.isCompare || ((e.clientX - contRect.left) / contRect.width >= splitPos());
+
     const rot = rotation(); if (rot === 90) { const tmp = rx; rx = ry; ry = 1 - tmp; } else if (rot === 180) { rx = 1 - rx; ry = 1 - ry; } else if (rot === 270) { const tmp = rx; rx = 1 - ry; ry = tmp; }
     if (flipX() === -1) rx = 1 - rx; if (flipY() === -1) ry = 1 - ry;
     
     const imgX = Math.floor(rx * imgBitmap.width); const imgY = Math.floor(ry * imgBitmap.height);
     try {
       const p = offscreenCtx.getImageData(imgX, imgY, 1, 1).data; let r = p[0] / 255; let g = p[1] / 255; let b = p[2] / 255;
-      if (props.lightState.enabled && (!props.isCompare || rx >= splitPos())) {
+      if (props.lightState.enabled && isHoveringAdjusted) {
         const l = props.lightState; const t_val = l.temp / 100; const tint_val = l.tint / 100; r *= (1.0 + (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); g *= (1.0 - (tint_val * 0.14)); b *= (1.0 - (t_val * 0.18)) * (1.0 + (tint_val * 0.08)); const exp = Math.pow(2, l.exposure / 50); r *= exp; g *= exp; b *= exp; const c = (l.contrast / 100) + 1; r = (r - 0.5) * c + 0.5; g = (g - 0.5) * c + 0.5; b = (b - 0.5) * c + 0.5;
         const baseLuma = 0.299 * r + 0.587 * g + 0.114 * b; const sMask = 1.0 - Math.max(0, Math.min(1, baseLuma / 0.5)); const hMask = Math.max(0, Math.min(1, (baseLuma - 0.5) / 0.5)); r += r * (l.shadows / 100) * sMask + r * (l.highlights / 100) * hMask; g += g * (l.shadows / 100) * sMask + g * (l.highlights / 100) * hMask; b += b * (l.shadows / 100) * sMask + b * (l.highlights / 100) * hMask;
         const w_p = 1.0 - (l.whites / 200); const b_p = 0.0 - (l.blacks / 200); r = (r - b_p) / (w_p - b_p); g = (g - b_p) / (w_p - b_p); b = (b - b_p) / (w_p - b_p);
       }
-      if (props.curves && (!props.isCompare || rx >= splitPos())) {
+      if (props.curves && isHoveringAdjusted) {
         const evalM = buildMonotonicCubicSpline(props.curves.master); r = evalM(Math.max(0, Math.min(1, r))); g = evalM(Math.max(0, Math.min(1, g))); b = evalM(Math.max(0, Math.min(1, b)));
         r = buildMonotonicCubicSpline(props.curves.red)(Math.max(0, Math.min(1, r))); g = buildMonotonicCubicSpline(props.curves.green)(Math.max(0, Math.min(1, r))); b = buildMonotonicCubicSpline(props.curves.blue)(Math.max(0, Math.min(1, b)));
       }
@@ -229,12 +223,7 @@ export const Viewport: Component<ViewportProps> = (props) => {
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
       <div ref={imgContainerRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, transition: 'clip-path 0.2s ease-out', display: hasImage() ? 'block' : 'none' }}>
-        
-        {/* FIX: DOM order swapped so Original Canvas renders on TOP of the Adjusted WebGPU canvas. 
-                 This allows the Original's left clip-path to reveal the Adjusted image! */}
-        <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPath(false), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
-        <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', display: props.isCompare ? 'block' : 'none', 'clip-path': getClipPath(true) }} />
-
+        <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPathBase(), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
         <CropOverlay 
           isActive={props.lightState.is_cropping}
           onConfirm={() => { if(props.updateLightState) props.updateLightState('is_cropping', false); }}
@@ -246,11 +235,22 @@ export const Viewport: Component<ViewportProps> = (props) => {
           setOrientation={(o) => { if(props.updateLightState) props.updateLightState('crop_orientation', o); }}
         />
       </div>
+
+      {/* Screen-Space Original Viewer: mathematically forces Original Image to ALWAYS be on the LHS */}
+      <div style={{ position: 'absolute', inset: 0, 'pointer-events': 'none', 'z-index': 2, 'clip-path': `inset(0 ${100 - splitPos() * 100}% 0 0)`, display: (props.isCompare && hasImage()) ? 'flex' : 'none', 'align-items': 'center', 'justify-content': 'center', overflow: 'hidden' }}>
+         <div ref={originalImgContainerRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})` }}>
+            <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPathBase() }} />
+         </div>
+      </div>
       
+      {/* New Bold Lucide Compare Slider */}
       {props.isCompare && hasImage() && (
         <div onPointerDown={(e) => { e.stopPropagation(); e.currentTarget.setPointerCapture(e.pointerId); isDraggingSplitter = true; }} onPointerMove={(e) => { if (isDraggingSplitter) { e.stopPropagation(); const rect = containerRef.getBoundingClientRect(); setSplitPos(Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))); } }} onPointerUp={(e) => { e.stopPropagation(); e.currentTarget.releasePointerCapture(e.pointerId); isDraggingSplitter = false; }} style={{ position: 'absolute', top: 0, bottom: 0, left: `${splitPos() * 100}%`, width: '40px', 'margin-left': '-20px', cursor: 'ew-resize', 'z-index': 100, display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'touch-action': 'none' }}>
-          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '19px', width: '1px', background: '#ABABAB', 'box-shadow': '0 0 4px rgba(0,0,0,0.3)', 'pointer-events': 'none' }}></div>
-          <div style={{ position: 'relative', background: '#1c1c1c', color: '#ABABAB', 'border-radius': '4px', border: '1px solid #444444', padding: '1px 4px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'font-size': '8px', 'font-weight': '800', 'box-shadow': '0 2px 6px rgba(0,0,0,0.6)', 'pointer-events': 'none', 'user-select': 'none', 'font-family': 'monospace', 'letter-spacing': '-0.5px' }}>&lt;&gt;</div>
+          <div style={{ position: 'absolute', top: 0, bottom: 0, left: '19px', width: '2px', background: '#fff', 'box-shadow': '0 0 6px rgba(0,0,0,0.8)', 'pointer-events': 'none' }}></div>
+          <div style={{ position: 'relative', background: '#1c1c1c', color: '#eee', 'border-radius': '50%', border: '2px solid #444', width: '32px', height: '32px', display: 'flex', 'align-items': 'center', 'justify-content': 'center', 'box-shadow': '0 4px 12px rgba(0,0,0,0.8)', 'pointer-events': 'none', 'user-select': 'none' }}>
+            <ChevronLeft size={16} strokeWidth={3} style={{ "margin-right": "-4px" }} />
+            <ChevronRight size={16} strokeWidth={3} style={{ "margin-left": "-4px" }} />
+          </div>
         </div>
       )}
       
