@@ -153,14 +153,18 @@ export const Viewport: Component<ViewportProps> = (props) => {
     let bottom = isCropped ? (1 - (p.crop_y + p.crop_h)) * 100 : 0;
     let left = isCropped ? p.crop_x * 100 : 0;
 
-    if (isCompareCanvas) {
+    if (props.isCompare) {
       const containerWidth = containerRef.clientWidth || window.innerWidth - 350;
       const dividerX = containerWidth * splitPos();
       const canvasCenterX = containerWidth / 2 + offset().x;
       const canvasDisplayWidth = pWidth * scale();
       const canvasLeft = canvasCenterX - canvasDisplayWidth / 2;
       const splitPercent = Math.max(0, Math.min(100, ((dividerX - canvasLeft) / canvasDisplayWidth) * 100));
-      left = Math.max(left, splitPercent);
+      
+      // FIX: Left clip applied ONLY to original layer to show the adjusted image on the left!
+      if (isCompareCanvas) {
+        left = Math.max(left, splitPercent);
+      }
     }
 
     if (top === 0 && right === 0 && bottom === 0 && left === 0) return 'none';
@@ -225,10 +229,12 @@ export const Viewport: Component<ViewportProps> = (props) => {
       {error() && <div style={{ color: '#ff6b6b', position: 'absolute', top: '20px', 'z-index': 100 }}>{error()}</div>}
       
       <div ref={imgContainerRef} style={{ position: 'absolute', 'transform-origin': 'center center', transform: `translate(${offset().x}px, ${offset().y}px) scale(${scale()}) rotate(${rotation()}deg) scaleX(${flipX()}) scaleY(${flipY()})`, 'z-index': 1, transition: 'clip-path 0.2s ease-out', display: hasImage() ? 'block' : 'none' }}>
-        <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', display: props.isCompare ? 'block' : 'none', 'clip-path': getClipPath(true) }} />
-        <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPath(false), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
         
-        {/* WE INJECT THE NEW cropLocked PROP HERE */}
+        {/* FIX: DOM order swapped so Original Canvas renders on TOP of the Adjusted WebGPU canvas. 
+                 This allows the Original's left clip-path to reveal the Adjusted image! */}
+        <canvas ref={canvasRef} style={{ position: 'absolute', width: '100%', height: '100%', 'clip-path': getClipPath(false), 'box-shadow': props.isCompare ? 'none' : '0 10px 50px rgba(0,0,0,0.8)' }} />
+        <canvas ref={originalCanvasRef} style={{ position: 'absolute', width: '100%', height: '100%', display: props.isCompare ? 'block' : 'none', 'clip-path': getClipPath(true) }} />
+
         <CropOverlay 
           isActive={props.lightState.is_cropping}
           onConfirm={() => { if(props.updateLightState) props.updateLightState('is_cropping', false); }}

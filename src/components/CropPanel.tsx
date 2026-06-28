@@ -89,6 +89,9 @@ export const CropPanel: Component<CropPanelProps> = (props) => {
            </button>
         </div>
         
+        {/* FIX: Label widened to "Aspect Ratio" */}
+        <span style={{ "font-size": "10px", color: "#aaa", width: "80px", "text-align": "right", "margin-right": "4px" }}>Aspect Ratio</span>
+
         {/* Aspect Ratio Dropdown */}
         <DropdownMenu.Root>
           <DropdownMenu.Trigger class="crop-select" disabled={!props.state.is_cropping} title={!props.state.is_cropping ? "Activate Crop Tool to change Aspect Ratio" : "Aspect Ratio"}>

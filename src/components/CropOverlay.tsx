@@ -27,7 +27,8 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
         if (parts.length === 2) {
           const rect = containerRef.getBoundingClientRect();
           if (rect.width > 0 && rect.height > 0) {
-            const targetRatio = props.orientation === "landscape" ? parts[0] / parts[1] : parts[1] / parts[0];
+            // FIX: Removed the buggy ternary inversion. The dropdown strings are already correct!
+            const targetRatio = parts[0] / parts[1];
             let { x, y, w, h } = props.cropRect;
             let newH = (w * rect.width) / targetRatio / rect.height;
             let newW = w;
@@ -95,7 +96,8 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
         } else {
           const parts = props.aspectRatio.split("x").map(Number);
           if (parts.length === 2) {
-            ratio = props.orientation === "landscape" ? parts[0] / parts[1] : parts[1] / parts[0];
+            // FIX: Removed the buggy ternary inversion here as well
+            ratio = parts[0] / parts[1];
           }
         }
 
@@ -124,7 +126,6 @@ export const CropOverlay: Component<CropOverlayProps> = (props) => {
     document.removeEventListener("pointerup", handlePointerUp);
   });
 
-  // Massive Hitboxes and Visually Dominant Handles
   const handleStyle = { position: "absolute", width: "40px", height: "40px", background: "transparent", "z-index": 10 };
   const cornerMarkStyle = { position: "absolute", background: "#fff", "pointer-events": "none", "box-shadow": "0 0 6px rgba(0,0,0,0.8)" };
   const gridLine = { "border-right": "3px solid rgba(255,255,255,0.6)", "border-bottom": "3px solid rgba(255,255,255,0.6)" };
